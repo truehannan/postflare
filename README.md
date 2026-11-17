@@ -101,32 +101,48 @@ proxies `/api` to `:8787`).
 
 ## Deploying
 
-### One click
+Deployment runs through the **GitHub Actions workflow** in
+`.github/workflows/deploy.yml` — that is the mechanism the Deploy button above
+uses, and it is the recommended path for every push to `main`.
 
-Use the **Deploy to Cloudflare** button above. It imports this repository and
-runs `.github/workflows/deploy.yml`, which:
+### One click (Deploy to Cloudflare button)
 
-1. installs dependencies,
-2. creates the D1 database + R2 bucket and applies migrations (`npm run bootstrap`),
-3. builds the frontend,
-4. deploys the Worker with `cloudflare/wrangler-action`.
+Clicking **Deploy to Cloudflare** imports this repository and, on its first
+push, runs the workflow. Each run performs these steps in CI:
 
-You need two (optionally three) secrets in your repository:
+1. `npm ci` — install dependencies
+2. `npm run bootstrap` — create the D1 database (writes its id into
+   `wrangler.jsonc`), create the R2 bucket, and apply the D1 migrations
+3. `npm run build` — typecheck + build the React frontend
+4. `wrangler deploy` via `cloudflare/wrangler-action` — deploy the Worker,
+   static assets and bindings, and set the `ENCRYPTION_KEY` Worker secret
+
+Because the workflow needs to provision Cloudflare resources, add these three
+secrets under **Settings → Secrets and variables → Actions**:
 
 | Secret | Required | Description |
 | --- | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | ✅ | Cloudflare API token with Workers, D1 and R2 edit scope |
+| `CLOUDFLARE_API_TOKEN` | ✅ | Cloudflare API token with **Workers**, **D1** and **R2** edit scope |
 | `CLOUDFLARE_ACCOUNT_ID` | ✅ | Your Cloudflare account id |
-| `ENCRYPTION_KEY` | ✅ | base64-encoded 32-byte encryption key (see below) |
+| `ENCRYPTION_KEY` | ✅ | base64-encoded 32-byte key (`openssl rand -base64 32`) |
 
-### Manual
+> `ENCRYPTION_KEY` must stay stable between deploys — if it changes, existing
+> encrypted credentials become unreadable. Keep it in the repo secret and reuse
+> the same value if you also deploy locally.
+
+### Manual (CLI)
+
+If you prefer to deploy from your machine instead of CI:
 
 ```bash
 npm install
 npm run bootstrap                      # creates D1 + R2, applies migrations
-openssl rand -base64 32 | xargs -I{} npx wrangler secret put ENCRYPTION_KEY
+npx wrangler secret put ENCRYPTION_KEY # paste the output of: openssl rand -base64 32
 npm run deploy
 ```
+
+`npm run bootstrap` is idempotent — safe to re-run after the first deploy.
+Reruns skip D1 creation once `wrangler.jsonc` contains a real `database_id`.
 
 ## Encryption & secrets
 
