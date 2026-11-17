@@ -66,24 +66,41 @@ export function ComposerPage() {
   const [campaignId, setCampaignId] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const selected = (accounts ?? []).filter((a) => selectedAccounts.includes(a.id));
-  const platforms = useMemo(() => {
-    const set = new Set<string>(selected.map((a) => a.providerId));
-    if (set.size === 0) set.add(DEFAULT_PLATFORM);
-    return [...set];
-  }, [selected]);
-
   const mediaAssets = mediaData?.items ?? [];
-  const selectedMedia = mediaAssets.filter((m) => mediaIds.includes(m.id));
 
-  // Ensure every platform has a variant entry.
+  // Derived from stable inputs only — `accounts` (query cache) and
+  // `selectedAccounts` (state). A new array here would re-trigger the effect
+  // below every render and cause an infinite loop (React error #185).
+  const platforms = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of accounts ?? []) {
+      if (selectedAccounts.includes(a.id)) set.add(a.providerId);
+    }
+    if (set.size === 0) set.add(DEFAULT_PLATFORM);
+    return [...set].sort();
+  }, [accounts, selectedAccounts]);
+
+  const selectedMedia = useMemo(
+    () => mediaAssets.filter((m) => mediaIds.includes(m.id)),
+    [mediaAssets, mediaIds],
+  );
+
+  // Ensure every platform has a variant entry and the active tab stays valid.
+  // Returning `prev` unchanged lets React bail out instead of re-rendering.
   useEffect(() => {
     setVariants((prev) => {
+      let changed = false;
       const next = { ...prev };
-      for (const p of platforms) if (!next[p]) next[p] = emptyVariant(prev[DEFAULT_PLATFORM]?.text ?? "");
-      return next;
+      for (const p of platforms) {
+        if (!next[p]) {
+          next[p] = emptyVariant(prev[DEFAULT_PLATFORM]?.text ?? "");
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
     });
-  }, [platforms]);
+    if (!platforms.includes(activeTab)) setActiveTab(platforms[0] ?? DEFAULT_PLATFORM);
+  }, [platforms, activeTab]);
 
   const activeVariant: VariantState = variants[activeTab] ?? variants[DEFAULT_PLATFORM] ?? emptyVariant();
 
@@ -177,9 +194,10 @@ export function ComposerPage() {
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Failed to create post"),
   });
 
-  const tabs = [
-    ...platforms.map((p) => ({ value: p, label: getPlatform(p)?.name ?? p })),
-  ];
+  const tabs = useMemo(
+    () => platforms.map((p) => ({ value: p, label: getPlatform(p)?.name ?? p })),
+    [platforms],
+  );
   const charCount = activeVariant.text.length;
   const charLimit = getPlatformLimit(activeTab, "maxTextLength");
   const overLimit = charLimit !== undefined && charCount > charLimit;
@@ -375,13 +393,13 @@ export function ComposerPage() {
                 type="datetime-local"
                 label="Schedule"
                 value={schedule}
-                onChange={(e) => setSchedule(e.target.value ? new Date(e.target.value).toISOString() : "")}
+                onChange={(e) => setSchedule(e.target.value)}
               />
               <Select
                 label="Campaign"
                 items={(campaigns ?? []).map((c) => ({ value: c.id, label: c.name }))}
-                value={campaignId}
-                onValueChange={(v) => setCampaignId(v as string)}
+                value={campaignId || undefined}
+                onValueChange={(v) => setCampaignId((v as string) ?? "")}
                 placeholder="No campaign"
               />
               {error ? <Text variant="error">{error}</Text> : null}
