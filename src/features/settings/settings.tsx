@@ -46,7 +46,7 @@ export function SettingsPage() {
                   <Key size={18} className="text-kumo-subtle" />
                   <div>
                     <Text DANGEROUS_className="font-medium">Developer credentials</Text>
-                    <Text variant="secondary" DANGEROUS_className="block text-[13px]">OAuth apps, API keys and tokens — encrypted at rest</Text>
+                    <Text variant="secondary" DANGEROUS_className="block text-[14px]">OAuth apps, API keys and tokens — encrypted at rest</Text>
                   </div>
                 </div>
                 <ArrowRight size={15} className="text-kumo-subtle group-hover:text-kumo-default" />
@@ -58,7 +58,7 @@ export function SettingsPage() {
                   <Plugs size={18} className="text-kumo-subtle" />
                   <div>
                     <Text DANGEROUS_className="font-medium">Social accounts</Text>
-                    <Text variant="secondary" DANGEROUS_className="block text-[13px]">Connect and manage accounts per platform</Text>
+                    <Text variant="secondary" DANGEROUS_className="block text-[14px]">Connect and manage accounts per platform</Text>
                   </div>
                 </div>
                 <ArrowRight size={15} className="text-kumo-subtle group-hover:text-kumo-default" />
@@ -71,7 +71,7 @@ export function SettingsPage() {
           <div className="border-b border-kumo-line px-4 py-2.5"><Text as="h2" variant="heading">Audit logs</Text></div>
           <Table>
             <thead>
-              <tr className="text-left text-[12px] text-kumo-subtle">
+              <tr className="text-left text-[14px] text-kumo-subtle">
                 <th className="px-4 py-2 font-medium">Action</th>
                 <th className="px-4 py-2 font-medium">Resource</th>
                 <th className="px-4 py-2 font-medium">Time</th>
@@ -82,7 +82,7 @@ export function SettingsPage() {
                 <tr><td colSpan={3} className="px-4 py-8 text-center"><Text variant="secondary">No audit events yet.</Text></td></tr>
               ) : (
                 (auditLogs ?? []).map((log) => (
-                  <tr key={log.id} className="border-t border-kumo-line text-[13px]">
+                  <tr key={log.id} className="border-t border-kumo-line text-[14px]">
                     <td className="px-4 py-2">{log.action}</td>
                     <td className="px-4 py-2 text-kumo-subtle">{log.resource_type}{log.resource_id ? ` · ${log.resource_id.slice(0, 12)}` : ""}</td>
                     <td className="px-4 py-2 text-kumo-subtle">{new Date(log.created_at).toLocaleString()}</td>

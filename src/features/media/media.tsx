@@ -62,11 +62,11 @@ export function MediaPage() {
                     <img src={a.url} alt={a.filename} className="aspect-square w-full object-cover" />
                   ) : (
                     <div className="flex aspect-square items-center justify-center bg-kumo-recessed">
-                      <Text variant="secondary" DANGEROUS_className="text-[12px]">video</Text>
+                      <Text variant="secondary" DANGEROUS_className="text-[14px]">video</Text>
                     </div>
                   )}
                   <div className="flex items-center justify-between px-2 py-1.5">
-                    <Text variant="secondary" DANGEROUS_className="truncate text-[12px]">{a.filename}</Text>
+                    <Text variant="secondary" DANGEROUS_className="truncate text-[14px]">{a.filename}</Text>
                     <Button variant="secondary" size="sm" shape="square" onClick={() => remove.mutate(a.id)} aria-label="Delete asset"><Trash size={13} /></Button>
                   </div>
                 </div>

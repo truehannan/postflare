@@ -295,7 +295,7 @@ export function ComposerPage() {
                   <Text as="label" variant="secondary" DANGEROUS_className="text-[14px]">Caption</Text>
                   <div className="flex items-center gap-1">
                     {charLimit !== undefined && (
-                      <Text variant={overLimit ? "error" : "secondary"} DANGEROUS_className="mono-nums text-[12px]">
+                      <Text variant={overLimit ? "error" : "secondary"} DANGEROUS_className="mono-nums text-[14px]">
                         {charCount}/{charLimit}
                       </Text>
                     )}
@@ -432,12 +432,12 @@ export function ComposerPage() {
                   <div key={p} className="rounded-md bg-kumo-recessed p-2.5">
                     <div className="flex items-center gap-1.5">
                       <PlatformIcon name={getPlatform(p)?.icon ?? "Circle"} size={14} />
-                      <Text DANGEROUS_className="text-[13px] font-medium">{getPlatform(p)?.name ?? p}</Text>
+                      <Text DANGEROUS_className="text-[14px] font-medium">{getPlatform(p)?.name ?? p}</Text>
                       {limit !== undefined && (
-                        <Text variant="secondary" DANGEROUS_className="mono-nums ml-auto text-[11px]">{v.text.length}/{limit}</Text>
+                        <Text variant="secondary" DANGEROUS_className="mono-nums ml-auto text-[14px]">{v.text.length}/{limit}</Text>
                       )}
                     </div>
-                    <Text variant="secondary" DANGEROUS_className="mt-1 block whitespace-pre-wrap text-[13px]">{v.text || "(empty)"}</Text>
+                    <Text variant="secondary" DANGEROUS_className="mt-1 block whitespace-pre-wrap text-[14px]">{v.text || "(empty)"}</Text>
                     {selectedMedia.length > 0 && (
                       <div className="mt-1.5 flex gap-1">
                         {selectedMedia.slice(0, 3).map((m) => (

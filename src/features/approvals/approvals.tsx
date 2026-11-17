@@ -35,7 +35,7 @@ export function ApprovalsPage() {
                 <div key={a.id} className="flex items-center justify-between gap-4 px-4 py-3">
                   <div className="grid gap-0.5">
                     <Text DANGEROUS_className="font-medium mono-nums">{a.postId.slice(0, 14)}</Text>
-                    <Text variant="secondary" DANGEROUS_className="text-[12px]">Requested {new Date(a.createdAt).toLocaleString()}</Text>
+                    <Text variant="secondary" DANGEROUS_className="text-[14px]">Requested {new Date(a.createdAt).toLocaleString()}</Text>
                   </div>
                   <StatusBadge status={a.status} />
                   <div className="flex gap-1">

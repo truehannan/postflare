@@ -64,7 +64,7 @@ export function CalendarPage() {
         <Surface className="overflow-hidden rounded-lg">
           <div className="grid grid-cols-7 border-b border-kumo-line">
             {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-              <div key={d} className="px-2 py-2 text-[12px] font-medium text-kumo-subtle">{d}</div>
+              <div key={d} className="px-2 py-2 text-[14px] font-medium text-kumo-subtle">{d}</div>
             ))}
           </div>
           <div className="grid grid-cols-7">
@@ -75,14 +75,14 @@ export function CalendarPage() {
                 <div key={i} className="min-h-24 border-b border-r border-kumo-line p-1.5 align-top last:border-r-0">
                   {day && (
                     <>
-                      <div className="mb-1 text-[12px] text-kumo-subtle mono-nums">{day}</div>
+                      <div className="mb-1 text-[14px] text-kumo-subtle mono-nums">{day}</div>
                       <div className="grid gap-1">
                         {items.slice(0, 3).map((item) => (
-                          <div key={item.id} className="truncate rounded bg-kumo-tint px-1.5 py-0.5 text-[11px]">
+                          <div key={item.id} className="truncate rounded bg-kumo-tint px-1.5 py-0.5 text-[14px]">
                             {statusLabel(item.status)} · {item.scheduled_for?.slice(11, 16)}
                           </div>
                         ))}
-                        {items.length > 3 && <div className="text-[11px] text-kumo-subtle">+{items.length - 3} more</div>}
+                        {items.length > 3 && <div className="text-[14px] text-kumo-subtle">+{items.length - 3} more</div>}
                       </div>
                     </>
                   )}

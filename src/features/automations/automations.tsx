@@ -53,7 +53,7 @@ export function AutomationsPage() {
                 <div key={a.id} className="flex items-center justify-between px-4 py-3">
                   <div className="grid gap-0.5">
                     <Text DANGEROUS_className="font-medium">{a.name}</Text>
-                    <Text variant="secondary" DANGEROUS_className="text-[12px]">{a.triggerType} · v{a.publishedVersion ?? 0}</Text>
+                    <Text variant="secondary" DANGEROUS_className="text-[14px]">{a.triggerType} · v{a.publishedVersion ?? 0}</Text>
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={a.status} />
@@ -71,7 +71,7 @@ export function AutomationsPage() {
           {AUTOMATION_TEMPLATES.map((t) => (
             <Surface key={t.id} className="rounded-lg p-4">
               <Text DANGEROUS_className="font-medium">{t.name}</Text>
-              <Text variant="secondary" DANGEROUS_className="mt-0.5 block text-[13px]">{t.description}</Text>
+              <Text variant="secondary" DANGEROUS_className="mt-0.5 block text-[14px]">{t.description}</Text>
               <Button variant="secondary" size="sm" className="mt-3" onClick={() => { setName(t.name); create.mutate(t.triggerType); }}>
                 Use template <ArrowRight size={13} />
               </Button>

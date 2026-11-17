@@ -82,11 +82,11 @@ export function InboxPage() {
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5">
                         <PlatformIcon name={c.providerId} size={14} />
-                        <Text DANGEROUS_className="truncate text-[13px] font-medium">{c.providerId}</Text>
+                        <Text DANGEROUS_className="truncate text-[14px] font-medium">{c.providerId}</Text>
                       </div>
                       {c.unreadCount > 0 && <span className="h-2 w-2 rounded-full bg-kumo-brand" />}
                     </div>
-                    <Text variant="secondary" DANGEROUS_className="mt-0.5 block truncate text-[13px]">{c.lastMessagePreview ?? "No messages"}</Text>
+                    <Text variant="secondary" DANGEROUS_className="mt-0.5 block truncate text-[14px]">{c.lastMessagePreview ?? "No messages"}</Text>
                   </button>
                 ))}
               </div>
@@ -114,7 +114,7 @@ export function InboxPage() {
                     (messages ?? []).map((m) => (
                       <div key={m.id} className={`max-w-[70%] rounded-lg px-3 py-2 ${m.direction === "outbound" ? "ml-auto bg-kumo-tint" : "bg-kumo-recessed"}`}>
                         <Text>{m.body}</Text>
-                        <Text variant="secondary" DANGEROUS_className="mt-0.5 block text-[11px]">{new Date(m.sentAt).toLocaleString()}</Text>
+                        <Text variant="secondary" DANGEROUS_className="mt-0.5 block text-[14px]">{new Date(m.sentAt).toLocaleString()}</Text>
                       </div>
                     ))
                   )}
@@ -123,7 +123,7 @@ export function InboxPage() {
                   {(quickReplies ?? []).length > 0 && (
                     <div className="mb-2 flex flex-wrap gap-1">
                       {(quickReplies ?? []).map((q) => (
-                        <button key={q.id} onClick={() => setReply(q.body)} className="rounded bg-kumo-recessed px-2 py-0.5 text-[12px] text-kumo-subtle hover:bg-kumo-tint">{q.title}</button>
+                        <button key={q.id} onClick={() => setReply(q.body)} className="rounded bg-kumo-recessed px-2 py-0.5 text-[14px] text-kumo-subtle hover:bg-kumo-tint">{q.title}</button>
                       ))}
                     </div>
                   )}

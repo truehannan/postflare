@@ -68,12 +68,12 @@ export function AccountsPage() {
                     <PlatformIcon name={getPlatform(a.providerId)?.icon ?? "Circle"} size={20} />
                     <div>
                       <Text DANGEROUS_className="font-medium">{a.accountName}</Text>
-                      <Text variant="secondary" DANGEROUS_className="block text-[13px]">{a.providerName}{a.username ? ` · @${a.username}` : ""}</Text>
+                      <Text variant="secondary" DANGEROUS_className="block text-[14px]">{a.providerName}{a.username ? ` · @${a.username}` : ""}</Text>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={a.status} />
-                    {a.isDefault && <Text variant="secondary" DANGEROUS_className="text-[12px]">Default</Text>}
+                    {a.isDefault && <Text variant="secondary" DANGEROUS_className="text-[14px]">Default</Text>}
                     <Button variant="secondary" size="sm" onClick={() => test.mutate(a.id)} loading={test.isPending}><ArrowClockwise size={14} /> Test</Button>
                     <Button variant="secondary" size="sm" onClick={() => setDefault.mutate(a.id)}>Set default</Button>
                     <Button variant="secondary" size="sm" shape="square" onClick={() => remove.mutate(a.id)} aria-label="Disconnect"><Trash size={14} /></Button>

@@ -52,7 +52,7 @@ export function TeamPage() {
         <Surface className="overflow-hidden rounded-lg">
           <Table>
             <thead>
-              <tr className="text-left text-[13px] text-kumo-subtle">
+              <tr className="text-left text-[14px] text-kumo-subtle">
                 <th className="px-4 py-2.5 font-medium">Member</th>
                 <th className="px-4 py-2.5 font-medium">Role</th>
                 <th className="px-4 py-2.5" />

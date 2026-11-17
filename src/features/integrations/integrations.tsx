@@ -34,11 +34,11 @@ export function IntegrationsPage() {
                         {p.configured && <Badge variant="success"><Check size={11} /> Configured</Badge>}
                         {!p.adapterImplemented && <Badge variant="outline">Adapter pending</Badge>}
                       </div>
-                      <Text variant="secondary" DANGEROUS_className="block truncate text-[13px]">{p.description}</Text>
+                      <Text variant="secondary" DANGEROUS_className="block truncate text-[14px]">{p.description}</Text>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Text variant="secondary" DANGEROUS_className="text-[12px]">{p.category}</Text>
+                    <Text variant="secondary" DANGEROUS_className="text-[14px]">{p.category}</Text>
                     <ArrowRight size={15} className="text-kumo-subtle" />
                   </div>
                 </Link>
@@ -46,7 +46,7 @@ export function IntegrationsPage() {
             </div>
           )}
         </Surface>
-        <Text variant="secondary" DANGEROUS_className="mt-3 block text-[13px]">
+        <Text variant="secondary" DANGEROUS_className="mt-3 block text-[14px]">
           Only platforms with a working adapter can be connected. Unsupported capabilities are surfaced honestly in the interface.
         </Text>
       </div>

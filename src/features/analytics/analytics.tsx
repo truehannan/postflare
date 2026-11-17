@@ -69,7 +69,7 @@ export function AnalyticsPage() {
                   {Object.entries(latest.metrics).map(([key, value]) => (
                     <div key={key} className="rounded-lg bg-kumo-recessed px-3 py-2.5">
                       <Text DANGEROUS_className="mono-nums text-[20px] font-semibold">{Number(value).toLocaleString()}</Text>
-                      <Text variant="secondary" DANGEROUS_className="block text-[12px]">{key.replace(/_/g, " ")}</Text>
+                      <Text variant="secondary" DANGEROUS_className="block text-[14px]">{key.replace(/_/g, " ")}</Text>
                     </div>
                   ))}
                 </div>

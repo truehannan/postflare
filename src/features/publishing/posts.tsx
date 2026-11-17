@@ -52,13 +52,13 @@ export function PostsPage({ status }: { status: string }) {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {post.variants.map((v) => (
-                        <div key={v.id} className="min-w-0 max-w-md truncate rounded bg-kumo-recessed px-2 py-1 text-[13px] text-kumo-subtle">
+                        <div key={v.id} className="min-w-0 max-w-md truncate rounded bg-kumo-recessed px-2 py-1 text-[14px] text-kumo-subtle">
                           {v.text.slice(0, 120) || "(empty)"}
                         </div>
                       ))}
                     </div>
                     {post.targets.map((t) => (
-                      <div key={t.id} className="flex items-center gap-2 text-[12px] text-kumo-subtle">
+                      <div key={t.id} className="flex items-center gap-2 text-[14px] text-kumo-subtle">
                         <span>{t.providerId}</span>
                         <StatusBadge status={t.status} />
                         {t.error && <span className="truncate text-kumo-danger">{t.error}</span>}

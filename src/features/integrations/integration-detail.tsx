@@ -76,7 +76,7 @@ export function IntegrationDetailPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <Text DANGEROUS_className="font-medium">OAuth connection</Text>
-                  <Text variant="secondary" DANGEROUS_className="block text-[13px]">
+                  <Text variant="secondary" DANGEROUS_className="block text-[14px]">
                     Redirect URI: <span className="mono-nums">{window.location.origin}/oauth/callback</span>
                   </Text>
                 </div>
@@ -140,7 +140,7 @@ export function IntegrationDetailPage() {
             <Text as="h2" variant="heading" DANGEROUS_className="mb-2">Capabilities</Text>
             <div className="grid gap-1.5">
               {capabilities.map(([cap, status]) => (
-                <div key={cap} className="flex items-center justify-between text-[13px]">
+                <div key={cap} className="flex items-center justify-between text-[14px]">
                   <span>{CAPABILITY_LABELS[cap as keyof typeof CAPABILITY_LABELS] ?? cap}</span>
                   <Badge variant={status === "supported" ? "success" : status === "partial" ? "warning" : "neutral"}>
                     {CAPABILITY_STATUS_LABELS[status as keyof typeof CAPABILITY_STATUS_LABELS] ?? status}
@@ -153,14 +153,14 @@ export function IntegrationDetailPage() {
           {data.note && (
             <Surface className="rounded-lg p-4">
               <Text as="h2" variant="heading" DANGEROUS_className="mb-1">Requirements</Text>
-              <Text variant="secondary" DANGEROUS_className="text-[13px]">{data.note}</Text>
+              <Text variant="secondary" DANGEROUS_className="text-[14px]">{data.note}</Text>
             </Surface>
           )}
 
           {data.docsUrl && (
             <Surface className="rounded-lg p-4">
               <Text as="h2" variant="heading" DANGEROUS_className="mb-1">Documentation</Text>
-              <a href={data.docsUrl} target="_blank" rel="noreferrer" className="text-kumo-brand hover:text-kumo-brand-hover text-[13px]">Official platform docs ↗</a>
+              <a href={data.docsUrl} target="_blank" rel="noreferrer" className="text-kumo-brand hover:text-kumo-brand-hover text-[14px]">Official platform docs ↗</a>
             </Surface>
           )}
         </div>

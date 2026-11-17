@@ -108,7 +108,7 @@ export function AppShell() {
         >
           <div className={`flex h-14 items-center gap-2 ${collapsed ? "justify-center px-0" : "px-4"}`}>
             <img src="/logo-mark.svg" alt="Postflare" className="h-7 w-7" />
-            {!collapsed && <span className="text-[15px] font-semibold leading-5">Postflare</span>}
+            {!collapsed && <span className="text-[14px] font-semibold leading-5">Postflare</span>}
           </div>
 
           {!collapsed && (
@@ -127,7 +127,7 @@ export function AppShell() {
             {NAV.map((section) => (
               <div key={section.group} className="mt-3">
                 {!collapsed && (
-                  <div className="px-2 pb-1 text-[11px] font-medium text-kumo-subtle">{section.group}</div>
+                  <div className="px-2 pb-1 text-[14px] font-medium text-kumo-subtle">{section.group}</div>
                 )}
                 <div className="grid gap-0.5">
                   {section.items.map((item) => (

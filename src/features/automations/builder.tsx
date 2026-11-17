@@ -35,7 +35,7 @@ const nodeColor = (category: string) =>
 
 function FlowNode({ data }: { data: { label: string; category: string; outputs: string[]; isTerminal?: boolean } }) {
   return (
-    <div className="min-w-40 rounded-md border border-kumo-line bg-kumo-elevated px-3 py-2 text-[13px] shadow-sm">
+    <div className="min-w-40 rounded-md border border-kumo-line bg-kumo-elevated px-3 py-2 text-[14px]">
       <div className="flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: nodeColor(data.category) }} />
         <span className="font-medium">{data.label}</span>
@@ -159,13 +159,13 @@ export function AutomationBuilderPage() {
       <div className="flex min-h-0 flex-1">
         {/* Palette */}
         <div className="w-52 shrink-0 overflow-y-auto border-r border-kumo-line bg-kumo-elevated p-2 pf-scroll">
-          <Text variant="secondary" DANGEROUS_className="px-1 pb-1 text-[11px] font-medium">Nodes</Text>
+          <Text variant="secondary" DANGEROUS_className="px-1 pb-1 text-[14px] font-medium">Nodes</Text>
           <div className="grid gap-0.5">
             {AUTOMATION_NODE_TYPES.map((t) => (
               <button
                 key={t.type}
                 onClick={() => addNode(t.type)}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-kumo-subtle hover:bg-kumo-tint hover:text-kumo-default"
               >
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: nodeColor(t.category) }} />
                 <span className="truncate">{t.label}</span>
@@ -220,7 +220,7 @@ export function AutomationBuilderPage() {
                     ) : (
                       <Input label={field.label} value={(value as string) ?? ""} onChange={(e) => updateSelectedData(field.key, e.target.value)} type={field.type === "secret" ? "password" : "text"} />
                     )}
-                    {field.description ? <Text variant="secondary" DANGEROUS_className="mt-1 block text-[12px]">{field.description}</Text> : null}
+                    {field.description ? <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">{field.description}</Text> : null}
                   </div>
                 );
               })}

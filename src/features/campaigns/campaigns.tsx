@@ -41,8 +41,8 @@ export function CampaignsPage() {
                 <Text DANGEROUS_className="font-medium">{c.name}</Text>
                 <Button variant="secondary" size="sm" shape="square" onClick={() => remove.mutate(c.id)} aria-label="Delete campaign"><Trash size={14} /></Button>
               </div>
-              {c.description ? <Text variant="secondary" DANGEROUS_className="mt-1 block text-[13px]">{c.description}</Text> : null}
-              {c.objective ? <Text variant="secondary" DANGEROUS_className="mt-2 block text-[12px]">Objective: {c.objective}</Text> : null}
+              {c.description ? <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">{c.description}</Text> : null}
+              {c.objective ? <Text variant="secondary" DANGEROUS_className="mt-2 block text-[14px]">Objective: {c.objective}</Text> : null}
             </Surface>
           ))}
           {(data ?? []).length === 0 && (
