@@ -79,9 +79,11 @@ export async function publishJob(env: Env, jobId: string): Promise<void> {
 
   const post = await env.DB.prepare("SELECT id, workspace_id FROM posts WHERE id = ?").bind(job.post_id)
     .first<{ id: string; workspace_id: string }>();
+  // `job.account_id` is a connected_accounts id; resolve the exact post target
+  // by (post_id, account_id).
   const target = await env.DB.prepare(
-    "SELECT pa.id, pa.provider_id, a.workspace_id FROM post_accounts pa JOIN connected_accounts a ON a.id = pa.account_id WHERE pa.id = ?",
-  ).bind(job.account_id).first<{ id: string; provider_id: string; workspace_id: string }>();
+    "SELECT pa.id, pa.provider_id, a.workspace_id FROM post_accounts pa JOIN connected_accounts a ON a.id = pa.account_id WHERE pa.post_id = ? AND pa.account_id = ?",
+  ).bind(job.post_id, job.account_id).first<{ id: string; provider_id: string; workspace_id: string }>();
   if (!post || !target) {
     await env.DB.prepare("UPDATE publishing_jobs SET status = 'dead', last_error = 'Missing post or target', updated_at = ? WHERE id = ?").bind(now, jobId).run();
     return;

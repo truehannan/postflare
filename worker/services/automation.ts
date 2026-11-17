@@ -52,7 +52,12 @@ export async function publishAutomation(env: Env, workspaceId: string, automatio
   if (!auto) throw notFound("Automation not found");
   validateFlow(definition);
 
-  const nextVersion = (auto.published_version ?? 0) + 1;
+  // Version 1 may already exist as the draft saved at creation time — always
+  // allocate a version above the maximum currently stored.
+  const maxRow = await env.DB.prepare(
+    "SELECT COALESCE(MAX(version), 0) AS mv FROM automation_versions WHERE automation_id = ?",
+  ).bind(automationId).first<{ mv: number }>();
+  const nextVersion = (maxRow?.mv ?? 0) + 1;
   await saveVersion(env, automationId, definition, actorId, nextVersion);
   await env.DB.prepare("UPDATE automations SET status = 'published', published_version = ?, updated_at = ? WHERE id = ?")
     .bind(nextVersion, new Date().toISOString(), automationId).run();

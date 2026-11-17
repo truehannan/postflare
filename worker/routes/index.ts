@@ -87,7 +87,7 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
   // Integrations (platform registry)
   // -------------------------------------------------------------------------
   const integrationRoutes = new Hono<AppCtx>();
-  integrationRoutes.use("*", requireAuth);
+  integrationRoutes.use("*", requireAuth, requireWorkspace);
   integrationRoutes.get("/", async (c) => {
     const creds = await credentials.listCredentialRecords(c.env, c.get("workspace").workspaceId);
     const configured = new Set(creds.map((r) => r.providerId));

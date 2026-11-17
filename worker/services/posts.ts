@@ -86,8 +86,8 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
   // Persist account targets.
   for (const account of accounts) {
     await env.DB.prepare(
-      "INSERT INTO post_accounts (id, post_id, account_id, provider_id, status) VALUES (?, ?, ?, ?, ?)",
-    ).bind(randomId("pa"), postId, account.id, account.provider_id, status === "queued" ? "queued" : "draft").run();
+      "INSERT INTO post_accounts (id, post_id, account_id, provider_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).bind(randomId("pa"), postId, account.id, account.provider_id, status === "queued" ? "queued" : "draft", now).run();
   }
 
   await audit(env, workspaceId, actorId, "post.create", "posts", postId, { status, accounts: accounts.length });
