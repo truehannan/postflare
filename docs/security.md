@@ -59,9 +59,15 @@ a list of which fields exist — never the plaintext.
 
 ## Password hashing
 
-Local passwords are hashed with **PBKDF2-SHA256** (Web Crypto, 120,000
+Local passwords are hashed with **PBKDF2-SHA256** (Web Crypto, 100,000
 iterations, 16-byte random salt) and compared in constant time. The hash format
 is versioned so the KDF can be strengthened later.
+
+> **Why 100,000?** Cloudflare Workers caps Web Crypto PBKDF2 at 100,000
+> iterations — requesting more throws `Pbkdf2 failed: iteration counts above
+> 100000 are not supported`. `hashPassword` clamps to this limit so behaviour is
+> identical in the Worker and in Node. This limit concerns **password hashing
+> only** and is unrelated to `ENCRYPTION_KEY`.
 
 ## Key rotation
 

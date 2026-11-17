@@ -155,6 +155,20 @@ tokens, bot tokens) is entered through the dashboard and encrypted at rest with
 envelope). Credentials are never returned to the browser after submission and
 never written to logs.
 
+`ENCRYPTION_KEY` must be a **base64-encoded 256-bit (32-byte)** key:
+
+```bash
+openssl rand -base64 32
+```
+
+This prints 44 characters (a trailing `=` is normal). If the value decodes to
+anything other than 32 bytes the Worker rejects it when a credential is stored.
+
+> **Troubleshooting** — a `Pbkdf2 failed: iteration counts above 100000 are not
+> supported` error during sign-up is **not** caused by `ENCRYPTION_KEY`. It is a
+> Cloudflare Workers limit on password-hashing (PBKDF2) iterations; Postflare
+> already clamps to 100,000. See [docs/security.md](docs/security.md#password-hashing).
+
 Read [docs/security.md](docs/security.md) for the full model, including key
 rotation and OAuth callback security.
 

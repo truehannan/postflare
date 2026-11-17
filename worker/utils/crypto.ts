@@ -132,11 +132,22 @@ export interface PasswordHash {
   hash: string;
 }
 
+/**
+ * Cloudflare Workers' Web Crypto caps PBKDF2 at 100,000 iterations — passing
+ * more throws `Pbkdf2 failed: iteration counts above 100000 are not
+ * supported`. Clamp so hashing works identically in the Worker and in Node.
+ */
+export const MAX_PBKDF2_ITERATIONS = 100_000;
+
 export async function hashPassword(
   password: string,
-  iterations = 120_000,
+  iterations = MAX_PBKDF2_ITERATIONS,
   salt?: Uint8Array,
 ): Promise<PasswordHash> {
+  const effectiveIterations = Math.min(
+    Math.max(iterations, 1),
+    MAX_PBKDF2_ITERATIONS,
+  );
   const saltBytes = salt ?? crypto.getRandomValues(new Uint8Array(16));
   const material = await crypto.subtle.importKey(
     "raw",
@@ -146,13 +157,13 @@ export async function hashPassword(
     ["deriveBits"],
   );
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: saltBytes, iterations, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBytes, iterations: effectiveIterations, hash: "SHA-256" },
     material,
     256,
   );
   return {
     algorithm: "PBKDF2-SHA256",
-    iterations,
+    iterations: effectiveIterations,
     salt: base64Encode(saltBytes),
     hash: base64Encode(new Uint8Array(bits)),
   };

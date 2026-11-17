@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hashPassword, verifyPassword } from "../../worker/utils/crypto";
+import { hashPassword, verifyPassword, MAX_PBKDF2_ITERATIONS } from "../../worker/utils/crypto";
 
 describe("password hashing (PBKDF2-SHA256)", () => {
   it("hashes and verifies a password", async () => {
@@ -18,5 +18,12 @@ describe("password hashing (PBKDF2-SHA256)", () => {
     const b = await hashPassword("same-password");
     expect(a.salt).not.toBe(b.salt);
     expect(a.hash).not.toBe(b.hash);
+  });
+
+  it("clamps iterations to the Workers limit (100,000)", async () => {
+    const hash = await hashPassword("some-password", 120_000);
+    expect(hash.iterations).toBe(MAX_PBKDF2_ITERATIONS);
+    expect(hash.iterations).toBe(100_000);
+    expect(await verifyPassword("some-password", hash)).toBe(true);
   });
 });
