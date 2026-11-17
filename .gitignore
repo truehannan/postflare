@@ -1,0 +1,35 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+dist-worker/
+.wrangler/
+
+# local dev secrets — never commit
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# local D1 / wrangler state
+.mf/
+.wrangler/state/
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# tests
+coverage/
+
+# misc
+*.tsbuildinfo
+
+# pi harness state
+.pi/

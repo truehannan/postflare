@@ -1,0 +1,35 @@
+/* Tailwind v4 does not scan node_modules by default — register Kumo's
+   distribution so its utility classes are generated. */
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+
+/* Kumo theme tokens must register before tailwindcss. */
+@import "@cloudflare/kumo/styles/tailwind";
+@import "tailwindcss";
+
+/* ---- app-level base (Kumo owns component styling) ---- */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Focus is styled by Kumo components; never remove outlines globally. */
+}
+
+/* Small, shared affordances that Kumo does not provide. Kept deliberately
+   minimal — do not re-implement Kumo components here. */
+.mono-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, currentColor 24%, transparent) transparent;
+}

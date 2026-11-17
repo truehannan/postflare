@@ -1,0 +1,74 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "postflare",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+
+  "vars": {
+    "PUBLIC_BASE_URL": ""
+  },
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "postflare-db",
+      "database_id": "REPLACE_ME_D1_DATABASE_ID",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "postflare-media"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "PUBLISH_QUEUE",
+        "queue": "postflare-publish-queue"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "postflare-publish-queue",
+        "max_batch_size": 10,
+        "max_batch_timeout": 10,
+        "max_retries": 5,
+        "dead_letter_queue": "postflare-publish-dlq"
+      }
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "INBOX_HUB",
+        "class_name": "InboxHub"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["InboxHub"]
+    }
+  ],
+
+  "triggers": {
+    "crons": ["* * * * *"]
+  }
+}

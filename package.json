@@ -1,0 +1,50 @@
+{
+  "name": "postflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Postflare — a unified social media management, publishing and conversational automation platform built on Cloudflare Workers.",
+  "scripts": {
+    "dev": "npm run build:ui && wrangler dev",
+    "dev:ui": "vite",
+    "build": "npm run typecheck && npm run build:ui",
+    "build:ui": "vite build",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "deploy": "npm run build && wrangler deploy",
+    "dry-run": "wrangler deploy --dry-run",
+    "db:migrate:local": "wrangler d1 migrations apply postflare-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply postflare-db --remote",
+    "db:execute:local": "wrangler d1 execute postflare-db --local --command",
+    "bootstrap": "node scripts/bootstrap.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@cloudflare/kumo": "^2.19.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-query": "^5.107.1",
+    "@xyflow/react": "^13.0.1",
+    "echarts": "^6.1.0",
+    "hono": "^4.13.19",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-hook-form": "^7.92.0",
+    "react-router-dom": "^7.18.5",
+    "zod": "^4.0.0",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.8",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.158.0"
+  }
+}
