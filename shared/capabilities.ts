@@ -617,6 +617,20 @@ export const PLATFORMS: PlatformInfo[] = [
         required: true,
         description: "Token obtained from @BotFather.",
       },
+      {
+        key: "chatId",
+        label: "Chat ID",
+        type: "text",
+        required: false,
+        description: "Channel or chat to publish to (e.g. @yourchannel or a numeric id).",
+      },
+      {
+        key: "apiBaseUrl",
+        label: "API base URL",
+        type: "text",
+        required: false,
+        description: "Optional. Override the Bot API endpoint for testing.",
+      },
     ],
     note: "Telegram bots can only message users who have started a conversation first.",
   },
@@ -747,6 +761,13 @@ export const PLATFORMS: PlatformInfo[] = [
         type: "secret",
         required: true,
         description: "Create an app password under Settings → App passwords.",
+      },
+      {
+        key: "apiBaseUrl",
+        label: "API base URL",
+        type: "text",
+        required: false,
+        description: "Optional. Override the AT Protocol service endpoint (self-hosted PDS or a test mock).",
       },
     ],
     note: "Bluesky has no scheduling or analytics API; Postflare schedules via its own queue.",
@@ -1074,6 +1095,41 @@ export const PLATFORMS: PlatformInfo[] = [
     ],
   },
 ];
+
+export interface PlatformLimits {
+  maxTextLength?: number;
+  maxImages?: number;
+  maxVideoDurationSec?: number;
+}
+
+/** Per-platform publishing limits used by the composer to show live counters. */
+export const PLATFORM_LIMITS: Record<string, PlatformLimits> = {
+  instagram: { maxTextLength: 2200, maxImages: 10, maxVideoDurationSec: 90 },
+  facebook: { maxTextLength: 63206, maxImages: 10 },
+  threads: { maxTextLength: 500, maxImages: 10 },
+  x: { maxTextLength: 280, maxImages: 4, maxVideoDurationSec: 140 },
+  linkedin: { maxTextLength: 3000, maxImages: 9 },
+  tiktok: { maxTextLength: 2200, maxImages: 1 },
+  youtube: { maxTextLength: 5000 },
+  pinterest: { maxTextLength: 500, maxImages: 1 },
+  reddit: { maxTextLength: 40000 },
+  tumblr: { maxTextLength: 4096, maxImages: 10 },
+  telegram: { maxTextLength: 4096 },
+  mastodon: { maxTextLength: 500, maxImages: 4 },
+  bluesky: { maxTextLength: 300, maxImages: 4 },
+  wordpress: { maxTextLength: 100000, maxImages: 20 },
+  medium: { maxTextLength: 100000 },
+  vk: { maxTextLength: 4096, maxImages: 10 },
+  ghost: { maxTextLength: 100000 },
+  webhook: { maxTextLength: 100000, maxImages: 20 },
+};
+
+export function getPlatformLimit(
+  platformId: string,
+  key: keyof PlatformLimits,
+): number | undefined {
+  return PLATFORM_LIMITS[platformId]?.[key];
+}
 
 export function getPlatform(id: string): PlatformInfo | undefined {
   return PLATFORMS.find((p) => p.id === id);

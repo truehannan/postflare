@@ -1,10 +1,14 @@
 import type { SocialPlatformAdapter, AccountProfile, PublishResult, AdapterCredentials } from "./types";
 import { providerFetch, redactError } from "./types";
 
-const BSKY = "https://bsky.social";
+const DEFAULT_BSKY = "https://bsky.social";
 
-async function createSession(credentials: AdapterCredentials) {
-  const res = await providerFetch(`${BSKY}/xrpc/com.atproto.server.createSession`, {
+function base(credentials: AdapterCredentials): string {
+  return (credentials.apiBaseUrl || DEFAULT_BSKY).replace(/\/+$/, "");
+}
+
+async function createSession(credentials: AdapterCredentials, baseUrl: string) {
+  const res = await providerFetch(`${baseUrl}/xrpc/com.atproto.server.createSession`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -21,8 +25,8 @@ async function createSession(credentials: AdapterCredentials) {
   return { ok: true as const, accessJwt: j.accessJwt, did: j.did, handle: j.handle };
 }
 
-async function uploadBlob(jwt: string, bytes: Uint8Array, mimeType: string) {
-  const res = await fetch(`${BSKY}/xrpc/com.atproto.repo.uploadBlob`, {
+async function uploadBlob(baseUrl: string, jwt: string, bytes: Uint8Array, mimeType: string) {
+  const res = await fetch(`${baseUrl}/xrpc/com.atproto.repo.uploadBlob`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${jwt}`,
@@ -47,16 +51,17 @@ export const blueskyAdapter: SocialPlatformAdapter = {
   displayName: "Bluesky",
 
   async validateCredentials(credentials) {
-    const s = await createSession(credentials);
+    const s = await createSession(credentials, base(credentials));
     if (!s.ok) return { ok: false, message: s.message };
     return { ok: true, message: `Connected as @${s.handle}` };
   },
 
   async getAccountProfile(credentials) {
-    const s = await createSession(credentials);
+    const baseUrl = base(credentials);
+    const s = await createSession(credentials, baseUrl);
     if (!s.ok) throw new Error(s.message);
     const res = await providerFetch(
-      `${BSKY}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(s.did)}`,
+      `${baseUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(s.did)}`,
       { token: s.accessJwt },
     );
     if (res.status !== 200 || !res.json) throw new Error(`Could not load Bluesky profile: HTTP ${res.status}`);
@@ -72,10 +77,12 @@ export const blueskyAdapter: SocialPlatformAdapter = {
 
   async publishPost(credentials, input) {
     try {
-      const s = await createSession(credentials);
+      const baseUrl = base(credentials);
+      const s = await createSession(credentials, baseUrl);
       if (!s.ok) return { ok: false, error: s.message, errorCode: "auth_failed", retryable: false };
 
       const now = new Date().toISOString();
+      const altText = typeof input.options?.altText === "string" ? input.options.altText : "";
       let record: Record<string, unknown> = {
         $type: "app.bsky.feed.post",
         text: input.text,
@@ -86,7 +93,7 @@ export const blueskyAdapter: SocialPlatformAdapter = {
         const images = [];
         for (const url of input.mediaUrls.slice(0, 4)) {
           const { bytes, mimeType } = await fetchBytes(url);
-          images.push({ image: await uploadBlob(s.accessJwt, bytes, mimeType), alt: "" });
+          images.push({ image: await uploadBlob(baseUrl, s.accessJwt, bytes, mimeType), alt: altText });
         }
         record = {
           ...record,
@@ -102,7 +109,7 @@ export const blueskyAdapter: SocialPlatformAdapter = {
         };
       }
 
-      const res = await providerFetch(`${BSKY}/xrpc/com.atproto.repo.createRecord`, {
+      const res = await providerFetch(`${baseUrl}/xrpc/com.atproto.repo.createRecord`, {
         method: "POST",
         token: s.accessJwt,
         headers: { "content-type": "application/json" },
@@ -123,9 +130,10 @@ export const blueskyAdapter: SocialPlatformAdapter = {
 
   async deletePost(credentials, remoteId) {
     try {
-      const s = await createSession(credentials);
+      const baseUrl = base(credentials);
+      const s = await createSession(credentials, baseUrl);
       if (!s.ok) return { ok: false, error: s.message, errorCode: "auth_failed" };
-      const res = await providerFetch(`${BSKY}/xrpc/com.atproto.repo.deleteRecord`, {
+      const res = await providerFetch(`${baseUrl}/xrpc/com.atproto.repo.deleteRecord`, {
         method: "POST",
         token: s.accessJwt,
         headers: { "content-type": "application/json" },

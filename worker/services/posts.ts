@@ -7,7 +7,16 @@ import { audit } from "./audit";
 import type { Post, PostStatus, PostVariant, PostAccountTarget } from "../../shared/types";
 
 export interface CreatePostInput {
-  variants: { providerId: string; text: string; title?: string | null; link?: string | null; mediaIds: string[] }[];
+  variants: {
+    providerId: string;
+    text: string;
+    title?: string | null;
+    link?: string | null;
+    mediaIds: string[];
+    firstComment?: string | null;
+    location?: string | null;
+    altText?: string | null;
+  }[];
   accountIds: string[];
   scheduledFor?: string | null;
   publishNow?: boolean;
@@ -74,8 +83,8 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
     if (!getPlatform(v.providerId)) throw badRequest(`Unknown platform: ${v.providerId}`);
     const variantId = randomId("var");
     await env.DB.prepare(
-      "INSERT INTO post_variants (id, post_id, provider_id, text, title, link, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ).bind(variantId, postId, v.providerId, v.text, v.title ?? null, v.link ?? null, now).run();
+      "INSERT INTO post_variants (id, post_id, provider_id, text, title, link, first_comment, location, alt_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).bind(variantId, postId, v.providerId, v.text, v.title ?? null, v.link ?? null, v.firstComment ?? null, v.location ?? null, v.altText ?? null, now).run();
     for (let i = 0; i < v.mediaIds.length; i++) {
       await env.DB.prepare(
         "INSERT INTO post_variant_media (id, variant_id, media_id, position) VALUES (?, ?, ?, ?)",
@@ -110,10 +119,10 @@ async function hydratePost(env: Env, row: Record<string, unknown>): Promise<Post
   const postId = row.id as string;
   const [variants, targets] = await Promise.all([
     env.DB.prepare(
-      `SELECT v.id, v.provider_id, v.text, v.title, v.link,
+      `SELECT v.id, v.provider_id, v.text, v.title, v.link, v.first_comment, v.location, v.alt_text,
               (SELECT json_group_array(pvm.media_id) FROM post_variant_media pvm WHERE pvm.variant_id = v.id) AS media_ids
          FROM post_variants v WHERE v.post_id = ? ORDER BY v.created_at`,
-    ).bind(postId).all<{ id: string; provider_id: string; text: string; title: string | null; link: string | null; media_ids: string | null }>(),
+    ).bind(postId).all<{ id: string; provider_id: string; text: string; title: string | null; link: string | null; first_comment: string | null; location: string | null; alt_text: string | null; media_ids: string | null }>(),
     env.DB.prepare(
       "SELECT id, account_id, provider_id, status, remote_id, error, published_at FROM post_accounts WHERE post_id = ? ORDER BY created_at",
     ).bind(postId).all<Record<string, unknown>>(),
@@ -126,6 +135,9 @@ async function hydratePost(env: Env, row: Record<string, unknown>): Promise<Post
     title: v.title,
     link: v.link,
     mediaIds: v.media_ids ? (JSON.parse(v.media_ids) as string[]) : [],
+    firstComment: v.first_comment,
+    location: v.location,
+    altText: v.alt_text,
   }));
 
   const targetList: PostAccountTarget[] = (targets.results ?? []).map((t) => ({

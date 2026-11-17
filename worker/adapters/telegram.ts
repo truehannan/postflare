@@ -1,10 +1,14 @@
 import type { SocialPlatformAdapter, AccountProfile, PublishResult } from "./types";
 import { redactError } from "./types";
 
-const API = "https://api.telegram.org";
+const DEFAULT_API = "https://api.telegram.org";
 
-async function call(method: string, token: string, body: Record<string, unknown>) {
-  const res = await fetch(`${API}/bot${token}/${method}`, {
+function apiBase(credentials: Record<string, string>): string {
+  return (credentials.apiBaseUrl || DEFAULT_API).replace(/\/+$/, "");
+}
+
+async function call(method: string, token: string, body: Record<string, unknown>, base: string) {
+  const res = await fetch(`${base}/bot${token}/${method}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -18,14 +22,14 @@ export const telegramAdapter: SocialPlatformAdapter = {
   displayName: "Telegram",
 
   async validateCredentials(credentials) {
-    const { json } = await call("getMe", credentials.botToken, {});
+    const { json } = await call("getMe", credentials.botToken, {}, apiBase(credentials));
     if (!json.ok) return { ok: false, message: redactError(json.description ?? "Invalid bot token") };
     const me = json.result as { username?: string; first_name?: string };
     return { ok: true, message: `Connected as @${me.username ?? me.first_name}` };
   },
 
   async getAccountProfile(credentials) {
-    const { json } = await call("getMe", credentials.botToken, {});
+    const { json } = await call("getMe", credentials.botToken, {}, apiBase(credentials));
     if (!json.ok) throw new Error(redactError(json.description ?? "Invalid bot token"));
     const me = json.result as { username?: string; first_name?: string; id: number };
     const profile: AccountProfile = {
@@ -49,7 +53,7 @@ export const telegramAdapter: SocialPlatformAdapter = {
     const { json, status } = await call("sendMessage", credentials.botToken, {
       chat_id: chatId,
       text: input.text || " ",
-    });
+    }, apiBase(credentials));
     if (!json.ok) {
       const result: PublishResult = {
         ok: false,
@@ -67,7 +71,7 @@ export const telegramAdapter: SocialPlatformAdapter = {
     const { json, status } = await call("sendMessage", credentials.botToken, {
       chat_id: recipientId,
       text,
-    });
+    }, apiBase(credentials));
     if (!json.ok) {
       return { ok: false, error: redactError(json.description ?? `HTTP ${status}`), errorCode: "send_failed", retryable: status >= 500 };
     }

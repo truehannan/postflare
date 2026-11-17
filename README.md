@@ -208,9 +208,14 @@ webhooks, and human handoff. See [docs/automation.md](docs/automation.md).
 
 ```bash
 npm test              # unit tests (crypto, OAuth, capabilities, password)
+npm run test:e2e      # full end-to-end suite against mock providers (21 flows)
 npm run typecheck     # Worker + frontend type checking
 npm run build         # full production build
 ```
+
+`npm run test:e2e` boots `wrangler dev` + a mock social-provider server and walks
+every feature (auth → publishing → inbox → automations → approvals → …) with fake
+credentials only — see [docs/testing.md](docs/testing.md).
 
 ## Documentation
 

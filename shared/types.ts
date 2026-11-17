@@ -107,6 +107,12 @@ export interface PostVariant {
   title?: string | null;
   link?: string | null;
   mediaIds: string[];
+  /** Optional first comment, where the platform supports it. */
+  firstComment?: string | null;
+  /** Optional location tag, where the platform supports it. */
+  location?: string | null;
+  /** Optional alt text for the cover image. */
+  altText?: string | null;
 }
 
 export interface PostAccountTarget {

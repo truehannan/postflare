@@ -18,6 +18,8 @@
     "bootstrap": "node scripts/bootstrap.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "node scripts/e2e.mjs",
+    "mock:provider": "node scripts/mock-provider.mjs",
     "format": "prettier --write ."
   },
   "dependencies": {

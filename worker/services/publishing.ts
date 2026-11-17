@@ -89,8 +89,10 @@ export async function publishJob(env: Env, jobId: string): Promise<void> {
     return;
   }
 
-  const variant = await env.DB.prepare("SELECT text, title, link FROM post_variants WHERE post_id = ? AND provider_id = ?")
-    .bind(job.post_id, target.provider_id).first<{ text: string; title: string | null; link: string | null }>();
+  const variant = await env.DB.prepare(
+    "SELECT text, title, link, first_comment, location, alt_text FROM post_variants WHERE post_id = ? AND provider_id = ?",
+  ).bind(job.post_id, target.provider_id)
+    .first<{ text: string; title: string | null; link: string | null; first_comment: string | null; location: string | null; alt_text: string | null }>();
 
   await env.DB.prepare("UPDATE post_accounts SET status = 'publishing' WHERE id = ?").bind(target.id).run();
   await env.DB.prepare("UPDATE posts SET status = 'publishing', updated_at = ? WHERE id = ?").bind(now, job.post_id).run();
@@ -109,6 +111,11 @@ export async function publishJob(env: Env, jobId: string): Promise<void> {
         title: variant?.title ?? undefined,
         link: variant?.link ?? undefined,
         mediaUrls,
+        options: {
+          altText: variant?.alt_text ?? undefined,
+          firstComment: variant?.first_comment ?? undefined,
+          location: variant?.location ?? undefined,
+        },
       });
     } catch (e) {
       result = { ok: false, error: e instanceof Error ? e.message : String(e), errorCode: "publish_error", retryable: false };

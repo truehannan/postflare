@@ -238,6 +238,9 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
         title: z.string().nullish(),
         link: z.string().nullish(),
         mediaIds: z.array(z.string()).default([]),
+        firstComment: z.string().nullish(),
+        location: z.string().nullish(),
+        altText: z.string().nullish(),
       })).min(1),
       accountIds: z.array(z.string()).default([]),
       scheduledFor: z.string().nullish(),
@@ -447,8 +450,8 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
     return jsonOk(c, await automations.publishAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"), input.definition, c.get("user").userId));
   });
   automationRoutes.post("/:id/test", async (c) => {
-    const input = await parseJson(c, z.object({ message: z.string().optional(), variables: z.record(z.string(), z.string()).optional() }));
-    const result = await automations.executeAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"), { message: input.message, variables: input.variables }, true);
+    const input = await parseJson(c, z.object({ message: z.string().optional(), contactId: z.string().nullish(), variables: z.record(z.string(), z.string()).optional() }));
+    const result = await automations.executeAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"), { message: input.message, contactId: input.contactId ?? undefined, variables: input.variables }, true);
     return jsonOk(c, result);
   });
   automationRoutes.get("/:id/executions", async (c) => {
