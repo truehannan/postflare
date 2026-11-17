@@ -111,8 +111,9 @@ Clicking **Deploy to Cloudflare** imports this repository and, on its first
 push, runs the workflow. Each run performs these steps in CI:
 
 1. `npm ci` — install dependencies
-2. `npm run bootstrap` — create the D1 database (writes its id into
-   `wrangler.jsonc`), create the R2 bucket, and apply the D1 migrations
+2. `npm run bootstrap` — create or reuse the D1 database (writes its id into
+   `wrangler.jsonc` when missing), create or reuse the R2 bucket, and apply any
+   pending D1 migrations
 3. `npm run build` — typecheck + build the React frontend
 4. `wrangler deploy` via `cloudflare/wrangler-action` — deploy the Worker,
    static assets and bindings, and set the `ENCRYPTION_KEY` Worker secret
@@ -141,8 +142,9 @@ npx wrangler secret put ENCRYPTION_KEY # paste the output of: openssl rand -base
 npm run deploy
 ```
 
-`npm run bootstrap` is idempotent — safe to re-run after the first deploy.
-Reruns skip D1 creation once `wrangler.jsonc` contains a real `database_id`.
+`npm run bootstrap` is idempotent — safe to re-run on every deploy. It detects an
+existing D1 database (by name) and R2 bucket and reuses them, only creating what
+is missing, and only applies migrations that have not run yet.
 
 ## Encryption & secrets
 

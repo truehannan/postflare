@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Bootstrap Cloudflare resources (D1, R2, migrations)
+      - name: Bootstrap Cloudflare resources (idempotent — reuses existing)
         run: npm run bootstrap
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
