@@ -18,6 +18,7 @@ const state = {
   telegram: { messages: [] },
   wordpress: { posts: [] },
   webhook: [],
+  composio: { actions: [] },
 };
 
 let counters = { bluesky: 0, mastodon: 0, telegram: 0, wordpress: 0 };
@@ -107,6 +108,45 @@ function handleWordpress(req, res, path, body) {
   return json(res, 404, { error: `unknown wordpress route ${req.method} ${path}` });
 }
 
+const COMPOSIO_ACCOUNTS = [
+  { id: "ca_twitter_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Mock X", word_id: null },
+  { id: "ca_linkedin_1", toolkit: { slug: "LINKEDIN" }, status: "ACTIVE", alias: "Mock LinkedIn", word_id: null },
+  { id: "ca_instagram_1", toolkit: { slug: "INSTAGRAM" }, status: "ACTIVE", alias: "Mock IG", word_id: null },
+  { id: "ca_telegram_1", toolkit: { slug: "TELEGRAM" }, status: "ACTIVE", alias: "Mock Tg", word_id: null },
+  { id: "ca_facebook_1", toolkit: { slug: "FACEBOOK" }, status: "ACTIVE", alias: "Mock FB Page", word_id: null },
+  { id: "ca_threads_1", toolkit: { slug: "THREADS" }, status: "ACTIVE", alias: "Mock Threads", word_id: null },
+  { id: "ca_reddit_1", toolkit: { slug: "REDDIT" }, status: "ACTIVE", alias: "Mock Reddit", word_id: null },
+  { id: "ca_github_1", toolkit: { slug: "GITHUB" }, status: "ACTIVE", alias: "Mock GitHub", word_id: null }, // unsupported in Postflare
+];
+
+function filterComposioAccounts(url) {
+  const ids = url.searchParams.get("connected_account_ids");
+  if (!ids) return COMPOSIO_ACCOUNTS;
+  const wanted = ids.split(",");
+  return COMPOSIO_ACCOUNTS.filter((a) => wanted.includes(a.id));
+}
+
+function handleComposio(req, res, path, body, url) {
+  if (path === "/connected_accounts") {
+    const items = filterComposioAccounts(url);
+    return json(res, 200, { items, next_cursor: null, total_items: items.length, current_page: 1, total_pages: 1 });
+  }
+  const toolMatch = path.match(/^\/tools\/execute\/([A-Z0-9_]+)$/);
+  if (req.method === "POST" && toolMatch) {
+    const slug = toolMatch[1];
+    const args = body.arguments ?? {};
+    state.composio.actions.push({ slug, args, connected_account_id: body.connected_account_id });
+    if (slug === "LINKEDIN_GET_MY_INFO") {
+      return json(res, 200, { data: JSON.stringify({ id: "mock-li-user", name: "Mock LinkedIn" }), error: null, successful: true });
+    }
+    if (slug === "INSTAGRAM_POST_IG_USER_MEDIA") {
+      return json(res, 200, { data: JSON.stringify({ id: "17890000000000001" }), error: null, successful: true });
+    }
+    return json(res, 200, { data: JSON.stringify({ id: `mock-post-${state.composio.actions.length}` }), error: null, successful: true });
+  }
+  return json(res, 404, { error: { message: `unknown composio route ${req.method} ${path}` } });
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -120,6 +160,7 @@ const server = createServer(async (req, res) => {
     state.telegram.messages.length = 0;
     state.wordpress.posts.length = 0;
     state.webhook.length = 0;
+    state.composio.actions.length = 0;
     counters = { bluesky: 0, mastodon: 0, telegram: 0, wordpress: 0 };
     return json(res, 200, { ok: true });
   }
@@ -128,6 +169,10 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/mastodon/")) return handleMastodon(req, res, path, body);
   if (path.startsWith("/telegram/")) return handleTelegram(req, res, path, body);
   if (path.startsWith("/wordpress/")) return handleWordpress(req, res, path, body);
+  if (path.startsWith("/composio/")) {
+    const composioPath = path.replace(/^\/composio\/api\/v3(\.1)?/, "");
+    return handleComposio(req, res, composioPath, body, url);
+  }
   if (path.startsWith("/webhook")) {
     state.webhook.push(body);
     return json(res, 200, { ok: true });

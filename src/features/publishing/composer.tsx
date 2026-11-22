@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/page-header";
 import { Modal, ModalFooter } from "@/components/modal";
 import { PlatformIcon } from "@/lib/platform-icon";
 import { getPlatform, getPlatformLimit, supports } from "@shared/capabilities";
+import { AUTOMATION_TEMPLATES, type AutomationTemplate } from "@shared/automation";
 import type { Campaign, ConnectedAccount, MediaAsset } from "@shared/types";
 
 const EMOJIS = ["😀", "🔥", "🎉", "❤️", "👍", "🚀", "✨", "📣", "💡", "📈", "👏", "🙌", "😊", "📷", "🎯", "✅"];
@@ -53,6 +54,7 @@ export function ComposerPage() {
     queryKey: ["campaigns"],
     queryFn: () => api.get<Campaign[]>("/api/campaigns"),
   });
+  const [attachedTemplates, setAttachedTemplates] = useState<string[]>([]);
 
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [variants, setVariants] = useState<Record<string, VariantState>>({ [DEFAULT_PLATFORM]: emptyVariant() });
@@ -103,6 +105,15 @@ export function ComposerPage() {
   }, [platforms, activeTab]);
 
   const activeVariant: VariantState = variants[activeTab] ?? variants[DEFAULT_PLATFORM] ?? emptyVariant();
+
+  // Templates relevant to the platforms being published to (or generic ones).
+  const eligibleTemplates = useMemo<AutomationTemplate[]>(
+    () =>
+      AUTOMATION_TEMPLATES.filter(
+        (t) => t.platforms.length === 0 || t.platforms.some((p) => platforms.includes(p)),
+      ),
+    [platforms],
+  );
 
   const updateVariant = (key: keyof VariantState, value: string) => {
     setVariants((prev) => ({ ...prev, [activeTab]: { ...(prev[activeTab] ?? emptyVariant()), [key]: value } }));
@@ -181,6 +192,7 @@ export function ComposerPage() {
         scheduledFor: mode === "schedule" && schedule ? new Date(schedule).toISOString() : null,
         publishNow: mode === "now",
         campaignId: campaignId || null,
+        attachTemplateIds: attachedTemplates,
       }),
     onSuccess: async (post, { mode }) => {
       if (mode === "approval") {
@@ -379,6 +391,57 @@ export function ComposerPage() {
                   value={activeVariant.altText}
                   onChange={(e) => updateVariant("altText", e.target.value)}
                 />
+              )}
+
+              {/* Quick automations, filtered to the selected platforms */}
+              {eligibleTemplates.length > 0 && (
+                <div className="border-t border-kumo-line pt-3">
+                  <Text as="label" variant="secondary" DANGEROUS_className="mb-1.5 block text-[14px]">
+                    Quick automations
+                  </Text>
+                  <div className="grid gap-1.5">
+                    {eligibleTemplates.map((t) => {
+                      const attached = attachedTemplates.includes(t.id);
+                      return (
+                        <label
+                          key={t.id}
+                          className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-kumo-tint"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={attached}
+                            onChange={() =>
+                              setAttachedTemplates((prev) =>
+                                prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id],
+                              )
+                            }
+                            className="mt-0.5 accent-[var(--color-kumo-brand)]"
+                          />
+                          <span className="grid">
+                            <span className="flex items-center gap-1.5">
+                              <Text DANGEROUS_className="font-medium">{t.name}</Text>
+                              {t.platforms.length > 0 ? (
+                                <span className="flex items-center gap-0.5">
+                                  {t.platforms.map((p) => (
+                                    <PlatformIcon key={p} name={getPlatform(p)?.icon ?? "Circle"} size={13} color={getPlatform(p)?.color} />
+                                  ))}
+                                </span>
+                              ) : (
+                                <span className="text-kumo-subtle">any platform</span>
+                              )}
+                            </span>
+                            <Text variant="secondary" DANGEROUS_className="block text-[14px]">
+                              {t.description}
+                            </Text>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">
+                    Attached automations are created and published bound to this post when you publish it.
+                  </Text>
+                </div>
               )}
             </div>
           </Surface>

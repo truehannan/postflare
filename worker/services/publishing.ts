@@ -82,8 +82,8 @@ export async function publishJob(env: Env, jobId: string): Promise<void> {
   // `job.account_id` is a connected_accounts id; resolve the exact post target
   // by (post_id, account_id).
   const target = await env.DB.prepare(
-    "SELECT pa.id, pa.provider_id, a.workspace_id FROM post_accounts pa JOIN connected_accounts a ON a.id = pa.account_id WHERE pa.post_id = ? AND pa.account_id = ?",
-  ).bind(job.post_id, job.account_id).first<{ id: string; provider_id: string; workspace_id: string }>();
+    "SELECT pa.id, pa.provider_id, a.workspace_id, a.connection_mode, a.external_id, a.config_json FROM post_accounts pa JOIN connected_accounts a ON a.id = pa.account_id WHERE pa.post_id = ? AND pa.account_id = ?",
+  ).bind(job.post_id, job.account_id).first<{ id: string; provider_id: string; workspace_id: string; connection_mode: string | null; external_id: string | null; config_json: string | null }>();
   if (!post || !target) {
     await env.DB.prepare("UPDATE publishing_jobs SET status = 'dead', last_error = 'Missing post or target', updated_at = ? WHERE id = ?").bind(now, jobId).run();
     return;
@@ -101,7 +101,30 @@ export async function publishJob(env: Env, jobId: string): Promise<void> {
   const adapter = getAdapter(target.provider_id);
 
   let result;
-  if (!adapter.publishPost) {
+  if (target.connection_mode === "composio") {
+    // Composio-backed account: publish by executing the mapped Composio tool.
+    const { getComposioApiKey, composioPublishWithKey } = await import("./composio");
+    const apiKey = await getComposioApiKey(env, target.workspace_id);
+    if (!apiKey) {
+      result = { ok: false, error: "Composio API key is not configured", errorCode: "missing_credentials", retryable: false };
+    } else {
+      try {
+        const mediaUrls = await resolveMediaForTarget(env, job.post_id, target.provider_id);
+        result = await composioPublishWithKey(env, apiKey, {
+          platformId: target.provider_id,
+          composioAccountId: target.external_id ?? "",
+          config: target.config_json ? JSON.parse(target.config_json) : {},
+          text: variant?.text ?? "",
+          title: variant?.title ?? undefined,
+          link: variant?.link ?? undefined,
+          mediaUrls,
+          altText: variant?.alt_text ?? undefined,
+        });
+      } catch (e) {
+        result = { ok: false, error: e instanceof Error ? e.message : String(e), errorCode: "publish_error", retryable: false };
+      }
+    }
+  } else if (!adapter.publishPost) {
     result = { ok: false, error: "This provider does not support publishing", errorCode: "unsupported", retryable: false };
   } else {
     try {

@@ -80,6 +80,8 @@ export interface ConnectedAccount {
   tokenExpiresAt: string | null;
   lastSyncedAt: string | null;
   lastError: string | null;
+  /** "direct" = per-platform credentials; "composio" = Composio-backed. */
+  connectionMode: "direct" | "composio";
   capabilities: string[];
   createdAt: string;
 }

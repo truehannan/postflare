@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Input, Select, Surface, Text } from "@cloudflare/kumo";
+import { Badge, Button, Input, Select, Surface, Text } from "@cloudflare/kumo";
 import { ArrowClockwise, Plus, Trash } from "@phosphor-icons/react";
 import { api, ApiClientError } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
@@ -73,6 +73,7 @@ export function AccountsPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={a.status} />
+                    {a.connectionMode === "composio" && <Badge variant="info">Via Composio</Badge>}
                     {a.isDefault && <Text variant="secondary" DANGEROUS_className="text-[14px]">Default</Text>}
                     <Button variant="secondary" size="sm" onClick={() => test.mutate(a.id)} loading={test.isPending}><ArrowClockwise size={14} /> Test</Button>
                     <Button variant="secondary" size="sm" onClick={() => setDefault.mutate(a.id)}>Set default</Button>

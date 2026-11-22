@@ -89,6 +89,8 @@ export interface AutomationTemplate {
   name: string;
   description: string;
   triggerType: string;
+  /** Postflare platform ids this template is relevant to; empty = generic. */
+  platforms: string[];
   definition: { nodes: { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }[]; edges: { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }[] };
 }
 
@@ -97,6 +99,7 @@ const commentToDm: AutomationTemplate = {
   name: "Instagram comment-to-DM",
   description: "Reply to commenters who use a specific keyword, tag them, and start a follow-up.",
   triggerType: "trigger.comment",
+  platforms: ["instagram"],
   definition: {
     nodes: [
       { id: "n1", type: "trigger.comment", position: { x: 0, y: 0 }, data: {} },
@@ -121,6 +124,7 @@ const welcomeBot: AutomationTemplate = {
   name: "Telegram welcome bot",
   description: "Send a welcome message and offer quick replies to new Telegram chats.",
   triggerType: "trigger.telegram_message",
+  platforms: ["telegram"],
   definition: {
     nodes: [
       { id: "n1", type: "trigger.telegram_message", position: { x: 0, y: 0 }, data: {} },
@@ -141,6 +145,7 @@ const leadQualification: AutomationTemplate = {
   name: "WhatsApp lead qualification",
   description: "Ask a qualification question and tag the contact based on their answer.",
   triggerType: "trigger.whatsapp_message",
+  platforms: ["whatsapp"],
   definition: {
     nodes: [
       { id: "n1", type: "trigger.whatsapp_message", position: { x: 0, y: 0 }, data: {} },
@@ -165,6 +170,7 @@ const faqAutomation: AutomationTemplate = {
   name: "FAQ automation",
   description: "Answer common questions with a keyword-based router.",
   triggerType: "trigger.keyword",
+  platforms: [],
   definition: {
     nodes: [
       { id: "n1", type: "trigger.keyword", position: { x: 0, y: 0 }, data: { keywords: "hours, price, refund" } },

@@ -1,8 +1,10 @@
 import type { Env } from "../env";
 import { getPlatform } from "../../shared/capabilities";
+import { AUTOMATION_TEMPLATES } from "../../shared/automation";
 import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
 import { enqueuePost } from "./publishing";
+import { createAutomation, publishAutomation } from "./automation";
 import { audit } from "./audit";
 import type { Post, PostStatus, PostVariant, PostAccountTarget } from "../../shared/types";
 
@@ -21,6 +23,8 @@ export interface CreatePostInput {
   scheduledFor?: string | null;
   publishNow?: boolean;
   campaignId?: string | null;
+  /** Quick-attach template ids; each is instantiated, published and bound to this post. */
+  attachTemplateIds?: string[];
 }
 
 export interface PostFilter {
@@ -103,6 +107,23 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
 
   if (input.publishNow) {
     await enqueuePost(env, workspaceId, postId, actorId);
+  }
+
+  // Quick automation attachments: instantiate each template, publish it and
+  // bind it to this post (the comment-to-DM style flows run per post).
+  for (const templateId of input.attachTemplateIds ?? []) {
+    const template = AUTOMATION_TEMPLATES.find((t) => t.id === templateId);
+    if (!template) throw badRequest(`Unknown automation template: ${templateId}`);
+    const automation = await createAutomation(env, workspaceId, actorId, {
+      name: `${template.name} — ${postId.slice(-6)}`,
+      triggerType: template.triggerType,
+      triggerConfig: { postId },
+      definition: template.definition,
+    });
+    await publishAutomation(env, workspaceId, automation.id, template.definition, actorId);
+    await env.DB.prepare(
+      "INSERT INTO post_automations (id, post_id, automation_id, created_at) VALUES (?, ?, ?, ?)",
+    ).bind(randomId("pa_link"), postId, automation.id, new Date().toISOString()).run();
   }
 
   return (await getPost(env, workspaceId, postId))!;

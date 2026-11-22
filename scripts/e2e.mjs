@@ -91,7 +91,8 @@ const PNG = Buffer.from(
 function patchConfig() {
   const p = join(root, "wrangler.jsonc");
   const original = readFileSync(p, "utf8");
-  const patched = original.replace(/"PUBLIC_BASE_URL"\s*:\s*"[^"]*"/, `"PUBLIC_BASE_URL": "${WORKER_URL}"`);
+  let patched = original.replace(/"PUBLIC_BASE_URL"\s*:\s*"[^"]*"/, `"PUBLIC_BASE_URL": "${WORKER_URL}"`);
+  patched = patched.replace(/"COMPOSIO_BASE_URL"\s*:\s*"[^"]*"/, `"COMPOSIO_BASE_URL": "${MOCK_URL}/composio/api/v3.1"`);
   writeFileSync(p, patched);
   return { p, original };
 }
@@ -119,12 +120,18 @@ function resetLocalD1() {
   if (existsSync(d1State)) rmSync(d1State, { recursive: true, force: true });
 }
 
-function runSync(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
-  if (r.status !== 0) {
-    throw new Error(`${cmd} ${args.join(" ")} failed:\n${r.stdout}\n${r.stderr}`);
+function runSync(cmd, args, { retries = 3 } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const r = spawnSync(cmd, args, { cwd: root, env, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+    if (r.status === 0) return r.stdout;
+    lastErr = new Error(`${cmd} ${args.join(" ")} failed:\n${r.stdout}\n${r.stderr}`);
+    // Local SQLite can be briefly locked by the running dev server; retry.
+    const busy = /SQLITE_BUSY|database is locked/.test(String(r.stderr) + String(r.stdout));
+    if (!busy || attempt === retries) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600);
   }
-  return r.stdout;
+  throw lastErr;
 }
 
 let mockProc = null;
@@ -454,6 +461,133 @@ async function runSuite() {
     const r = await api("GET", "/api/posts", { workspaceId: ws });
     assert(r.status === 403, `expected 403, got ${r.status}`);
     cookie = altCookie; // restore
+  });
+
+  // ---- Composio hub ------------------------------------------------------------
+  let composioAccounts = {};
+  await test("save + test Composio API key (mock backend)", async () => {
+    const st = ok(await api("GET", "/api/composio", { workspaceId: ws }));
+    assert(st.data.data.configured === false, "composio not configured initially");
+    assert(Array.isArray(st.data.data.supported) && st.data.data.supported.length >= 7, "7 supported platforms");
+    const save = ok(await api("PUT", "/api/composio/key", { body: { apiKey: "MOCK-COMPOSIO-KEY" }, workspaceId: ws }));
+    assert(save.data.data.ok === true, "key validates against the mock Composio");
+  });
+  await test("list Composio connected accounts (only supported platforms mapped)", async () => {
+    const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws }));
+    const items = list.data.data;
+    assert(items.length === 8, `expected 8 mock composio accounts, got ${items.length}`);
+    const github = items.find((a) => a.toolkit === "GITHUB");
+    assert(github && github.providerId === null, "unsupported toolkits are surfaced unmapped");
+    const twitter = items.find((a) => a.toolkit === "TWITTER");
+    assert(twitter && twitter.providerId === "x", "toolkit mapped to postflare platform");
+  });
+  await test("import Composio accounts (x, telegram with chatId, instagram)", async () => {
+    const imports = [
+      { composioAccountId: "ca_twitter_1", providerId: "x", accountName: "Composio X" },
+      { composioAccountId: "ca_telegram_1", providerId: "telegram", config: { chatId: "@composiochannel" } },
+      { composioAccountId: "ca_instagram_1", providerId: "instagram" },
+    ];
+    for (const body of imports) {
+      const r = ok(await api("POST", "/api/composio/import", { body, workspaceId: ws }));
+      composioAccounts[body.providerId] = r.data.data.accountId;
+    }
+    const accounts = ok(await api("GET", "/api/accounts", { workspaceId: ws }));
+    const viaComposio = accounts.data.data.filter((a) => a.connectionMode === "composio");
+    assert(viaComposio.length === 3, "3 composio accounts registered");
+  });
+  await test("duplicate Composio import is rejected", async () => {
+    const r = await api("POST", "/api/composio/import", { body: { composioAccountId: "ca_twitter_1", providerId: "x" }, workspaceId: ws });
+    assert(r.status === 400, `expected 400 for duplicate import, got ${r.status}`);
+  });
+  await test("missing required config (telegram chatId) is rejected", async () => {
+    const r = await api("POST", "/api/composio/import", { body: { composioAccountId: "ca_reddit_1", providerId: "reddit" }, workspaceId: ws });
+    assert(r.status === 400, `expected 400 without subreddit, got ${r.status}`);
+  });
+  await test("publish via Composio reaches the tool API (x + telegram)", async () => {
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [
+          { providerId: "x", text: "Hello from Composio X" },
+          { providerId: "telegram", text: "Hello from Composio Tg" },
+        ],
+        accountIds: [composioAccounts.x, composioAccounts.telegram],
+        publishNow: true,
+      },
+    }));
+    const id = r.data.data.id;
+    await waitFor(async () => {
+      const p = ok(await api("GET", "/api/posts", { workspaceId: ws }));
+      const post = p.data.data.items.find((x) => x.id === id);
+      return ["published", "partially_published", "failed"].includes(post?.status) ? post : null;
+    }, 40000);
+    const inspect = await (await fetch(`${MOCK_URL}/__inspect`)).json();
+    const xAction = inspect.composio.actions.find((a) => a.slug === "TWITTER_CREATION_OF_A_POST");
+    assert(xAction && xAction.args.text === "Hello from Composio X", "X publish tool called with text");
+    assert(xAction.connected_account_id === "ca_twitter_1", "executed with the composio account id");
+    const tgAction = inspect.composio.actions.find((a) => a.slug === "TELEGRAM_SEND_MESSAGE");
+    assert(tgAction && tgAction.args.chat_id === "@composiochannel", "telegram tool called with imported chatId config");
+  });
+  await test("publish media via Composio Instagram (container + publish two-step)", async () => {
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "instagram", text: "Composio IG caption", altText: "a pixel", mediaIds: [mediaId] }],
+        accountIds: [composioAccounts.instagram],
+        publishNow: true,
+      },
+    }));
+    const id = r.data.data.id;
+    await waitFor(async () => {
+      const p = ok(await api("GET", "/api/posts", { workspaceId: ws }));
+      const post = p.data.data.items.find((x) => x.id === id);
+      return ["published", "failed"].includes(post?.status) ? post : null;
+    }, 40000);
+    const inspect = await (await fetch(`${MOCK_URL}/__inspect`)).json();
+    const container = inspect.composio.actions.find((a) => a.slug === "INSTAGRAM_POST_IG_USER_MEDIA");
+    assert(container && container.args.caption === "Composio IG caption", "container tool called with caption");
+    assert(typeof container.args.image_url === "string" && container.args.image_url.startsWith(WORKER_URL), "media url resolved to the worker");
+    const publish = inspect.composio.actions.find((a) => a.slug === "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH");
+    assert(publish && publish.args.creation_id === "17890000000000001", "publish tool called with the container id");
+  });
+
+  // ---- Quick automation attach (composer) ---------------------------------------
+  await test("attach a template while composing instantiates + publishes the automation", async () => {
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "bluesky", text: "Post with attached automation" }],
+        accountIds: [accounts.bluesky],
+        attachTemplateIds: ["instagram-comment-to-dm"],
+      },
+    }));
+    const postId = r.data.data.id;
+    const autos = ok(await api("GET", "/api/automations", { workspaceId: ws }));
+    const attached = autos.data.data.find(
+      (a) => a.name.startsWith("Instagram comment-to-DM") && a.status === "published",
+    );
+    assert(!!attached, "automation created and published from template");
+    const links = await (async () => {
+      const out = runSync("npx", ["wrangler", "d1", "execute", "postflare-db", "--local", "--json", "--command",
+        `SELECT automation_id FROM post_automations WHERE post_id = '${postId}'`]);
+      return JSON.parse(out)[0].results.map((row) => row.automation_id);
+    })();
+    assert(links.includes(attached.id), "automation linked to the post");
+  });
+
+  // ---- Data retention ------------------------------------------------------------
+  await test("data retention settings are enforced by the cron sweep", async () => {
+    // Seed an audit row far in the past, configure retention, run the sweep.
+    runSync("npx", ["wrangler", "d1", "execute", "postflare-db", "--local", "--command",
+      `INSERT INTO audit_logs (id, workspace_id, actor_id, action, resource_type, resource_id, metadata_json, created_at) VALUES ('audit_old', '${ws}', NULL, 'old.event', 'test', NULL, '{}', '2020-01-01T00:00:00.000Z')`]);
+    ok(await api("PATCH", "/api/settings", { body: { settings: { retentionDays: 90 } }, workspaceId: ws }));
+    const sweepRes = await rawFetch("/cdn-cgi/local/scheduled?worker=postflare", { method: "POST" });
+    assert(sweepRes.status === 200, "sweep ran");
+    const check = JSON.parse(runSync("npx", ["wrangler", "d1", "execute", "postflare-db", "--local", "--json", "--command",
+      `SELECT COUNT(*) AS n FROM audit_logs WHERE id = 'audit_old'`]));
+    assert(Number(check[0].results[0].n) === 0, "old audit row purged by retention policy");
+    // Restore settings so later sweeps keep everything.
+    ok(await api("PATCH", "/api/settings", { body: { settings: { retentionDays: 0 } }, workspaceId: ws }));
   });
 }
 

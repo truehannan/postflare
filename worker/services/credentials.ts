@@ -1,5 +1,6 @@
 import type { Env } from "../env";
 import { getPlatform } from "../../shared/capabilities";
+import { COMPOSIO_CREDENTIAL_FIELDS, COMPOSIO_PROVIDER_ID } from "../../shared/composio";
 import { buildKeyring, decrypt, encrypt, parseEnvelope, serializeEnvelope, type Keyring } from "../utils/crypto";
 import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
@@ -38,8 +39,14 @@ export interface CredentialRecord {
   updatedAt: string;
 }
 
+/** Credential schema for a provider: the Composio hub or a platform adapter. */
+function credentialSchema(providerId: string) {
+  if (providerId === COMPOSIO_PROVIDER_ID) return COMPOSIO_CREDENTIAL_FIELDS;
+  return getPlatform(providerId)?.credentialFields ?? [];
+}
+
 function requiredFields(providerId: string): string[] {
-  return (getPlatform(providerId)?.credentialFields ?? [])
+  return credentialSchema(providerId)
     .filter((f) => f.required)
     .map((f) => f.key);
 }
@@ -51,8 +58,8 @@ export async function storeCredentials(
   fields: CredentialFields,
   actorId: string,
 ): Promise<void> {
-  const platform = getPlatform(providerId);
-  if (!platform) throw notFound("Unknown integration provider");
+  const platform = providerId === COMPOSIO_PROVIDER_ID ? null : getPlatform(providerId);
+  if (!platform && providerId !== COMPOSIO_PROVIDER_ID) throw notFound("Unknown integration provider");
 
   const required = requiredFields(providerId);
   const missing = required.filter((k) => !fields[k]?.trim());
@@ -170,6 +177,13 @@ export async function testCredentials(
   providerId: string,
   fields?: CredentialFields,
 ): Promise<TestResult> {
+  // The Composio hub key is tested against Composio, not a platform adapter.
+  if (providerId === COMPOSIO_PROVIDER_ID) {
+    const { testComposioKey } = await import("./composio");
+    const credentials = fields ?? (await getCredentials(env, workspaceId, providerId));
+    const apiKey = credentials?.apiKey ?? "";
+    return testComposioKey(env, apiKey);
+  }
   const adapter = getAdapter(providerId);
   if (!adapter.validateCredentials) {
     return { ok: false, message: "This provider does not support credential testing" };

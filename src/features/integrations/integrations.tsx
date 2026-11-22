@@ -5,6 +5,7 @@ import { ArrowRight, Check } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { PlatformIcon } from "@/lib/platform-icon";
+import { ComposioPanel } from "@/features/integrations/composio-panel";
 import type { PlatformInfo } from "@shared/capabilities";
 
 type IntegrationRow = PlatformInfo & { configured: boolean; adapterImplemented: boolean };
@@ -17,8 +18,10 @@ export function IntegrationsPage() {
 
   return (
     <div>
-      <PageHeader title="Integrations" description="Configure developer credentials for each platform. Everything is encrypted at rest with AES-256-GCM." />
-      <div className="px-6 pb-8">
+      <PageHeader title="Integrations" description="Connect platforms through Composio with one API key, or configure direct developer credentials per platform. Everything is encrypted at rest with AES-256-GCM." />
+      <div className="grid gap-4 px-6 pb-8">
+        <ComposioPanel />
+        <Text DANGEROUS_className="px-1">Direct platform credentials</Text>
         <Surface className="overflow-hidden rounded-lg">
           {isLoading ? (
             <div className="px-4 py-8 text-center"><Text variant="secondary">Loading…</Text></div>
@@ -34,11 +37,11 @@ export function IntegrationsPage() {
                         {p.configured && <Badge variant="success"><Check size={11} /> Configured</Badge>}
                         {!p.adapterImplemented && <Badge variant="outline">Adapter pending</Badge>}
                       </div>
-                      <Text variant="secondary" DANGEROUS_className="block truncate text-[14px]">{p.description}</Text>
+                      <Text DANGEROUS_className="block truncate text-[14px]">{p.description}</Text>
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <Text variant="secondary" DANGEROUS_className="text-[14px]">{p.category}</Text>
+                    <Text DANGEROUS_className="text-[14px]">{p.category}</Text>
                     <ArrowRight size={15} className="text-kumo-subtle" />
                   </div>
                 </Link>
@@ -46,7 +49,7 @@ export function IntegrationsPage() {
             </div>
           )}
         </Surface>
-        <Text variant="secondary" DANGEROUS_className="mt-3 block text-[14px]">
+        <Text DANGEROUS_className="mt-3 block text-[14px]">
           Only platforms with a working adapter can be connected. Unsupported capabilities are surfaced honestly in the interface.
         </Text>
       </div>

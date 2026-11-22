@@ -22,6 +22,8 @@ import * as approvals from "../services/approvals";
 import * as team from "../services/team";
 import { getPlatform, PLATFORMS } from "../../shared/capabilities";
 import { AUTOMATION_NODE_TYPES, AUTOMATION_TEMPLATES } from "../../shared/automation";
+import { COMPOSIO_SUPPORTED } from "../../shared/composio";
+import * as composio from "../services/composio";
 import { hasAdapter } from "../adapters/registry";
 
 type AppCtx = { Bindings: Env; Variables: { user: AuthedUser; workspace: WorkspaceScope } };
@@ -105,6 +107,45 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
     return jsonOk(c, { ...platform, configured: !!creds, masked: creds?.masked ?? {}, fieldKeys: creds?.fieldKeys ?? [], adapterImplemented: hasAdapter(platform.id) });
   });
   app.route("/api/integrations", integrationRoutes);
+
+  // -------------------------------------------------------------------------
+  // Composio hub (single API key for every supported platform)
+  // -------------------------------------------------------------------------
+  const composioRoutes = new Hono<AppCtx>();
+  composioRoutes.use("*", requireAuth, requireWorkspace);
+  composioRoutes.get("/", async (c) => {
+    const record = await credentials.getCredentialRecord(c.env, c.get("workspace").workspaceId, "composio");
+    return jsonOk(c, {
+      configured: !!record,
+      supported: COMPOSIO_SUPPORTED,
+    });
+  });
+  composioRoutes.put("/key", async (c) => {
+    const input = await parseJson(c, z.object({ apiKey: z.string().min(1) }));
+    await credentials.storeCredentials(c.env, c.get("workspace").workspaceId, "composio", { apiKey: input.apiKey }, c.get("user").userId);
+    const test = await credentials.testCredentials(c.env, c.get("workspace").workspaceId, "composio");
+    return jsonOk(c, test);
+  });
+  composioRoutes.post("/test", async (c) => {
+    const input = await parseJson(c, z.object({ apiKey: z.string().optional() }).optional());
+    const result = await credentials.testCredentials(c.env, c.get("workspace").workspaceId, "composio", input?.apiKey ? { apiKey: input.apiKey } : undefined);
+    return jsonOk(c, result);
+  });
+  composioRoutes.get("/connected-accounts", async (c) => {
+    const list = await composio.listComposioAccounts(c.env, c.get("workspace").workspaceId);
+    return jsonOk(c, list);
+  });
+  composioRoutes.post("/import", async (c) => {
+    const input = await parseJson(c, z.object({
+      composioAccountId: z.string().min(1),
+      providerId: z.string().min(1),
+      accountName: z.string().optional(),
+      config: z.record(z.string(), z.string()).optional(),
+    }));
+    const result = await composio.importComposioAccount(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
+    return jsonOk(c, result, 201);
+  });
+  app.route("/api/composio", composioRoutes);
 
   // -------------------------------------------------------------------------
   // Credentials
@@ -246,6 +287,7 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
       scheduledFor: z.string().nullish(),
       publishNow: z.boolean().default(false),
       campaignId: z.string().nullish(),
+      attachTemplateIds: z.array(z.string()).default([]),
     }));
     const post = await posts.createPost(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
     return jsonOk(c, post, 201);

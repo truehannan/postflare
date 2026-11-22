@@ -4,6 +4,26 @@ The matrix is defined in `shared/capabilities.ts` and is the single source of
 truth for what each platform can do. The UI derives available actions from it;
 unsupported actions are never shown as functional buttons.
 
+## Two ways to connect
+
+Every platform can be connected **directly** (per-platform developer credentials,
+the table below) or — for the platforms Composio supports — through the
+**Composio hub**: one workspace API key, hosted OAuth on Composio's side, and
+publishing via Composio tools (`shared/composio.ts` maps verified tool slugs):
+
+| Platform | Composio toolkit | Publish tool |
+| --- | --- | --- |
+| X / Twitter | `TWITTER` | `TWITTER_CREATION_OF_A_POST` |
+| Instagram | `INSTAGRAM` | `INSTAGRAM_POST_IG_USER_MEDIA` → `…_PUBLISH` (two-step) |
+| Facebook | `FACEBOOK` | `FACEBOOK_CREATE_POST` (needs Page ID) |
+| LinkedIn | `LINKEDIN` | `LINKEDIN_CREATE_LINKED_IN_POST` (author resolved at import) |
+| Threads | `THREADS` | `THREADS_CREATE_POST` |
+| Reddit | `REDDIT` | `REDDIT_CREATE_REDDIT_POST` (needs subreddit) |
+| Telegram | `TELEGRAM` | `TELEGRAM_SEND_MESSAGE` (needs chat ID) |
+
+Mastodon, Bluesky, YouTube and the rest stay direct-only — Composio has no
+first-party toolkits for them, so Postflare does not pretend otherwise.
+
 ## Adapter implementation status
 
 | Platform | Connection | Validate | Publish | Notes |

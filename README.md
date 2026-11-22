@@ -26,6 +26,9 @@ integration adapter.
 
 | Area | Status |
 | --- | --- |
+| **Composio hub** — every supported platform via one API key | ✅ |
+| Quick automations attached per-post from the composer | ✅ |
+| Data retention (cron-enforced purge policies) | ✅ |
 | Auth (email + password, PBKDF2, session cookies) | ✅ |
 | Workspaces, roles (RBAC), invitations, audit logs | ✅ |
 | Dashboard-managed credentials, AES-256-GCM encrypted | ✅ |

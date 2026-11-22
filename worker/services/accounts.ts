@@ -58,6 +58,7 @@ function mapAccount(row: Record<string, unknown>): ConnectedAccount {
     tokenExpiresAt: row.token_expires_at as string | null,
     lastSyncedAt: row.last_synced_at as string | null,
     lastError: row.last_error as string | null,
+    connectionMode: (row.connection_mode as ConnectedAccount["connectionMode"]) ?? "direct",
     capabilities: Object.keys(platform?.capabilities ?? {}),
     createdAt: row.created_at as string,
   };
@@ -120,6 +121,22 @@ export async function setDefaultAccount(env: Env, workspaceId: string, accountId
 /** Test connectivity to an account and update its status. */
 export async function testAccount(env: Env, workspaceId: string, accountId: string): Promise<{ ok: boolean; message: string }> {
   const { account, credentials } = await getAccountCredentials(env, workspaceId, accountId);
+
+  // Composio-backed accounts are verified against Composio, not the platform adapter.
+  if (account.connectionMode === "composio") {
+    const { getComposioApiKey, testComposioAccount } = await import("./composio");
+    const apiKey = await getComposioApiKey(env, workspaceId);
+    if (!apiKey) {
+      return { ok: false, message: "Composio API key is not configured" };
+    }
+    const composioIdRow = await env.DB.prepare(
+      "SELECT external_id FROM connected_accounts WHERE id = ?",
+    ).bind(accountId).first<{ external_id: string }>();
+    const result = await testComposioAccount(env, apiKey, composioIdRow?.external_id ?? "");
+    await updateAccountStatus(env, workspaceId, accountId, result.ok ? "connected" : "error", result.ok ? null : result.message);
+    return result;
+  }
+
   const adapter = getAdapter(account.providerId);
   if (!adapter.validateCredentials) {
     return { ok: false, message: "This provider does not support connectivity testing" };

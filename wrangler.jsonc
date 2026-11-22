@@ -9,7 +9,8 @@
   },
 
   "vars": {
-    "PUBLIC_BASE_URL": ""
+    "PUBLIC_BASE_URL": "",
+    "COMPOSIO_BASE_URL": ""
   },
 
   "assets": {

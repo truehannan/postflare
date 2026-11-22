@@ -14,6 +14,8 @@ export interface Env {
   ENCRYPTION_KEY: string;
   /** Public base URL used to resolve media URLs for external providers. */
   PUBLIC_BASE_URL: string;
+  /** Optional Composio API base override (testing); defaults to the real API. */
+  COMPOSIO_BASE_URL: string;
 }
 
 /** Injected onto the Hono context by middleware. */

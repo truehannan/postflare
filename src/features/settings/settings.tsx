@@ -14,14 +14,38 @@ export function SettingsPage() {
   const workspace = useActiveWorkspace();
   const [name, setName] = useState(workspace?.name ?? "");
   const [timezone, setTimezone] = useState(workspace?.timezone ?? "UTC");
+  const [retentionDays, setRetentionDays] = useState("");
+  const [metricsRetentionDays, setMetricsRetentionDays] = useState("");
 
   const { data: auditLogs } = useQuery({
     queryKey: ["audit-logs"],
     queryFn: () => api.get<AuditRow[]>("/api/settings/audit-logs"),
   });
+  const { data: settings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: () => api.get<Record<string, unknown>>("/api/settings"),
+  });
+
+  // Seed retention inputs once loaded from the server.
+  const [retentionLoaded, setRetentionLoaded] = useState(false);
+  if (settings && !retentionLoaded) {
+    setRetentionLoaded(true);
+    setRetentionDays(settings.retentionDays ? String(settings.retentionDays) : "");
+    setMetricsRetentionDays(settings.metricsRetentionDays ? String(settings.metricsRetentionDays) : "");
+  }
 
   const save = useMutation({
     mutationFn: () => api.patch("/api/settings", { settings: { timezone } }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
+  });
+  const saveRetention = useMutation({
+    mutationFn: () =>
+      api.patch("/api/settings", {
+        settings: {
+          retentionDays: retentionDays ? Number(retentionDays) : 0,
+          metricsRetentionDays: metricsRetentionDays ? Number(metricsRetentionDays) : 0,
+        },
+      }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings"] }),
   });
 
@@ -31,12 +55,40 @@ export function SettingsPage() {
       <div className="grid gap-6 px-6 pb-8 lg:grid-cols-2">
         <div className="grid content-start gap-4">
           <Surface className="rounded-lg p-5">
-            <Text as="h2" variant="heading" DANGEROUS_className="mb-3">Workspace</Text>
+            <Text DANGEROUS_className="mb-3">Workspace</Text>
             <div className="grid gap-3">
               <Input label="Workspace name" value={name} onChange={(e) => setName(e.target.value)} />
               <Input label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="e.g. Europe/London" />
               <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending} className="justify-self-start">Save</Button>
             </div>
+          </Surface>
+
+          <Surface className="rounded-lg p-5">
+            <Text DANGEROUS_className="mb-1">Data retention</Text>
+            <Text DANGEROUS_className="mb-3 block">
+              The nightly cron purge deletes workspace data older than these windows. 0 keeps data forever.
+            </Text>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input
+                label="Operational data (days)"
+                type="number"
+                value={retentionDays}
+                onChange={(e) => setRetentionDays(e.target.value)}
+                placeholder="e.g. 90"
+                description="Audit logs, publishing attempts and automation execution steps."
+              />
+              <Input
+                label="Analytics snapshots (days)"
+                type="number"
+                value={metricsRetentionDays}
+                onChange={(e) => setMetricsRetentionDays(e.target.value)}
+                placeholder="e.g. 365"
+                description="Account metric snapshots used by the analytics page."
+              />
+            </div>
+            <Button variant="primary" className="mt-3 justify-self-start" loading={saveRetention.isPending} onClick={() => saveRetention.mutate()}>
+              Save retention
+            </Button>
           </Surface>
 
           <div className="grid gap-3">
@@ -46,7 +98,7 @@ export function SettingsPage() {
                   <Key size={18} className="text-kumo-subtle" />
                   <div>
                     <Text DANGEROUS_className="font-medium">Developer credentials</Text>
-                    <Text variant="secondary" DANGEROUS_className="block text-[14px]">OAuth apps, API keys and tokens — encrypted at rest</Text>
+                    <Text DANGEROUS_className="block text-[14px]">OAuth apps, API keys and tokens — encrypted at rest</Text>
                   </div>
                 </div>
                 <ArrowRight size={15} className="text-kumo-subtle group-hover:text-kumo-default" />
@@ -58,7 +110,7 @@ export function SettingsPage() {
                   <Plugs size={18} className="text-kumo-subtle" />
                   <div>
                     <Text DANGEROUS_className="font-medium">Social accounts</Text>
-                    <Text variant="secondary" DANGEROUS_className="block text-[14px]">Connect and manage accounts per platform</Text>
+                    <Text DANGEROUS_className="block text-[14px]">Connect and manage accounts per platform</Text>
                   </div>
                 </div>
                 <ArrowRight size={15} className="text-kumo-subtle group-hover:text-kumo-default" />
