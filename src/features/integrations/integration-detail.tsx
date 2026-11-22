@@ -6,6 +6,7 @@ import { ArrowLeft, FloppyDisk, Lightning, Trash } from "@phosphor-icons/react";
 import { api, ApiClientError } from "@/lib/api";
 import { PlatformIcon } from "@/lib/platform-icon";
 import { CAPABILITY_LABELS, CAPABILITY_STATUS_LABELS, type PlatformInfo } from "@shared/capabilities";
+import { PlugsConnected } from "@phosphor-icons/react";
 
 interface Detail extends PlatformInfo {
   configured: boolean;
@@ -52,6 +53,19 @@ export function IntegrationDetailPage() {
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "OAuth failed"),
   });
 
+  // Composio auth gateway: authorize on Composio's hosted page with one key.
+  const { data: composioStatus } = useQuery({
+    queryKey: ["composio-status"],
+    queryFn: () => api.get<{ configured: boolean; supported: { platformId: string }[] }>("/api/composio"),
+    enabled: !!providerId,
+  });
+  const composioSupported = composioStatus?.supported.some((s) => s.platformId === providerId) ?? false;
+  const composioConnect = useMutation({
+    mutationFn: () => api.post<{ redirectUrl: string }>("/api/composio/connect", { providerId }),
+    onSuccess: (r) => window.location.assign(r.redirectUrl),
+    onError: (e) => setError(e instanceof ApiClientError ? e.message : "Could not start the Composio connection"),
+  });
+
   if (!data) return <div className="p-6"><Text variant="secondary">Loading…</Text></div>;
 
   const capabilities = Object.entries(data.capabilities).filter(([, v]) => v && v !== "unsupported");
@@ -70,6 +84,27 @@ export function IntegrationDetailPage() {
         <Surface className="rounded-lg p-5">
           <Text as="h2" variant="heading" DANGEROUS_className="mb-1">Credentials</Text>
           <Text variant="secondary" DANGEROUS_className="mb-4 block">{data.description}</Text>
+
+          {composioStatus?.configured && composioSupported && (
+            <div className="mb-5 rounded-lg bg-kumo-recessed p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Text DANGEROUS_className="font-medium">Connect via Composio</Text>
+                  <Text variant="secondary" DANGEROUS_className="block max-w-md">
+                    Authorize once on Composio's hosted gateway — no developer credentials needed. The connection is created under your Postflare Composio user and appears in Settings → Integrations.
+                  </Text>
+                </div>
+                <Button variant="primary" onClick={() => composioConnect.mutate()} loading={composioConnect.isPending}>
+                  <PlugsConnected size={14} /> Connect via Composio
+                </Button>
+              </div>
+            </div>
+          )}
+          {composioStatus?.configured && !composioSupported && (
+            <Text variant="secondary" DANGEROUS_className="mb-4 block">
+              This platform is not available through Composio — use the direct credentials below.
+            </Text>
+          )}
 
           {oauthAvailable && (
             <div className="mb-5 rounded-lg bg-kumo-recessed p-4">

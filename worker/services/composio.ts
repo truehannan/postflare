@@ -58,6 +58,13 @@ async function composioFetch<T = unknown>(
   return { status: res.status, json, text };
 }
 
+/**
+ * Every Postflare-initiated Composio connection is created under this user.
+ * Listing also filters by it, so dashboard-made connections (other users) are
+ * never picked up accidentally.
+ */
+export const COMPOSIO_USER = "postflare";
+
 /** Get the workspace's stored Composio API key (decrypted, server-side only). */
 export async function getComposioApiKey(env: Env, workspaceId: string): Promise<string | null> {
   const creds = await getCredentials(env, workspaceId, COMPOSIO_PROVIDER_ID);
@@ -80,7 +87,79 @@ interface ComposioAccountItem {
   status: string;
   alias: string | null;
   word_id: string | null;
+  user_id?: string;
   toolkit: { slug: string };
+}
+
+interface AuthConfigItem {
+  id: string;
+  status?: string;
+  toolkit?: { slug: string };
+}
+
+export interface ComposioLinkResult {
+  redirectUrl: string;
+  composioAccountId: string | null;
+  providerId: string;
+}
+
+/**
+ * Initiate a Composio connection for a platform under the Postflare user —
+ * the auth gateway. Resolves the toolkit's enabled auth config, creates a
+ * link, and returns Composio's hosted authorization URL plus the new
+ * connected account id (for auto-import once the user returns).
+ */
+export async function initiateComposioConnection(
+  env: Env,
+  workspaceId: string,
+  providerId: string,
+  origin: string,
+): Promise<ComposioLinkResult> {
+  const support = getComposioSupport(providerId);
+  if (!support) throw badRequest("This platform is not supported through Composio");
+  const apiKey = await getComposioApiKey(env, workspaceId);
+  if (!apiKey) throw badRequest("Configure the Composio API key first");
+
+  // 1. Find an enabled auth config for the toolkit (Composio-managed works).
+  const cfgRes = await composioFetch<{ items?: AuthConfigItem[] }>(
+    env,
+    apiKey,
+    `/auth_configs?toolkit_slug=${encodeURIComponent(support.toolkit)}&show_disabled=false`,
+  );
+  if (cfgRes.status !== 200 || !cfgRes.json) {
+    throw badRequest(`Could not read Composio auth configs (HTTP ${cfgRes.status})`);
+  }
+  const config = (cfgRes.json.items ?? []).find((c) => (c.status ?? "ENABLED") === "ENABLED");
+  if (!config) {
+    throw badRequest(
+      `No enabled Composio auth config for ${support.toolkit}. Enable the toolkit's connection in your Composio project settings first.`,
+    );
+  }
+
+  // 2. Create the link under the Postflare user with a callback back here.
+  const callbackUrl = `${origin}/settings/integrations?composio=connected&provider=${encodeURIComponent(providerId)}`;
+  const linkRes = await composioFetch<{
+    redirect_url?: string;
+    connected_account_id?: string;
+    error?: { message?: string };
+  }>(env, apiKey, "/connected_accounts/link", {
+    method: "POST",
+    body: JSON.stringify({
+      auth_config_id: config.id,
+      user_id: COMPOSIO_USER,
+      callback_url: callbackUrl,
+    }),
+  });
+  if (linkRes.status !== 201 || !linkRes.json?.redirect_url) {
+    const message = linkRes.json?.error?.message ?? `Composio link failed (HTTP ${linkRes.status})`;
+    throw badRequest(message);
+  }
+
+  return {
+    redirectUrl: linkRes.json.redirect_url,
+    composioAccountId: linkRes.json.connected_account_id ?? null,
+    providerId,
+  };
 }
 
 export interface ComposioRemoteAccount {
@@ -97,10 +176,10 @@ export async function listComposioAccounts(env: Env, workspaceId: string): Promi
   const apiKey = await getComposioApiKey(env, workspaceId);
   if (!apiKey) throw badRequest("Configure the Composio API key first");
 
-  const res = await composioFetch<{ items?: ComposioAccountItem[] }>(
+  const res = await composioFetch<{ items?: (ComposioAccountItem & { user_id?: string })[] }>(
     env,
     apiKey,
-    "/connected_accounts?limit=100",
+    `/connected_accounts?limit=100&user_ids=${encodeURIComponent(COMPOSIO_USER)}`,
   );
   if (res.status !== 200 || !res.json) {
     throw badRequest(`Could not list Composio accounts (HTTP ${res.status})`);

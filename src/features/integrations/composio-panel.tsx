@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Input, Surface, Text } from "@cloudflare/kumo";
-import { DownloadSimple, Key, Lightning } from "@phosphor-icons/react";
+import { DownloadSimple, Key, Lightning, PlugsConnected } from "@phosphor-icons/react";
 import { api, ApiClientError } from "@/lib/api";
 import { Modal, ModalFooter } from "@/components/modal";
 import { PlatformIcon } from "@/lib/platform-icon";
@@ -30,6 +30,7 @@ export function ComposioPanel() {
   const [importTarget, setImportTarget] = useState<RemoteAccount | null>(null);
   const [importName, setImportName] = useState("");
   const [importConfig, setImportConfig] = useState<Record<string, string>>({});
+  const [returnProvider, setReturnProvider] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ["composio-status"],
@@ -52,6 +53,63 @@ export function ComposioPanel() {
     },
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Could not save the Composio key"),
   });
+
+  // Detect the return from Composio's hosted authorization and pick the flow
+  // back up (auto-import, or open the config modal for FB/Reddit/Telegram).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("composio") !== "connected") return;
+    const provider = params.get("provider");
+    window.history.replaceState({}, "", window.location.pathname);
+    setReturnProvider(provider);
+  }, []);
+
+  const connect = useMutation({
+    mutationFn: (providerId: string) =>
+      api.post<{ redirectUrl: string; composioAccountId: string | null; providerId: string }>("/api/composio/connect", { providerId }),
+    onSuccess: (r) => {
+      // Send the user to Composio's hosted authorization page.
+      window.location.assign(r.redirectUrl);
+    },
+    onError: (e) => setError(e instanceof ApiClientError ? e.message : "Could not start the Composio connection"),
+  });
+
+  const autoImport = useMutation({
+    mutationFn: (target: RemoteAccount) =>
+      api.post("/api/composio/import", { composioAccountId: target.id, providerId: target.providerId }),
+    onSuccess: () => {
+      setMessage("Composio account connected and imported.");
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: ["composio-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e) => setError(e instanceof ApiClientError ? e.message : "Import failed"),
+  });
+
+  // Once accounts are loaded after a gateway return, finish the import.
+  useEffect(() => {
+    if (!returnProvider || !remoteAccounts) return;
+    setReturnProvider(null);
+    const pending = remoteAccounts.filter(
+      (a) => a.providerId === returnProvider && a.status === "ACTIVE" && !a.imported,
+    );
+    if (pending.length === 0) {
+      setMessage("Composio authorization completed — no new active account found yet. It may take a moment to become active.");
+      return;
+    }
+    const target = pending[0];
+    const needsConfig = (status?.supported.find((s) => s.platformId === target.providerId)?.accountConfigFields ?? []).some(
+      (f) => f.required,
+    );
+    if (needsConfig) {
+      setImportTarget(target);
+      setImportConfig({});
+      setMessage("Composio authorization completed — finish importing the account.");
+    } else {
+      autoImport.mutate(target);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [returnProvider, remoteAccounts]);
 
   const importAccount = useMutation({
     mutationFn: (target: RemoteAccount) =>
@@ -111,10 +169,35 @@ export function ComposioPanel() {
 
       {status?.configured && (
         <div className="mt-5 border-t border-kumo-line pt-4">
+          <Text DANGEROUS_className="mb-1">Connect a new account</Text>
+          <Text variant="secondary" DANGEROUS_className="mb-2 block max-w-xl">
+            Authorize each platform on Composio's hosted page — no developer credentials and nothing to configure in the Composio dashboard. Connections are created under your Postflare Composio user and appear below.
+          </Text>
+          <div className="flex flex-wrap gap-1.5">
+            {status.supported.map((s) => {
+              const platform = getPlatform(s.platformId);
+              return (
+                <Button
+                  key={s.platformId}
+                  variant="secondary"
+                  size="sm"
+                  loading={connect.isPending && connect.variables === s.platformId}
+                  onClick={() => connect.mutate(s.platformId)}
+                >
+                  <PlugsConnected size={13} /> Connect {platform?.name ?? s.platformId}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {status?.configured && (
+        <div className="mt-5 border-t border-kumo-line pt-4">
           <Text DANGEROUS_className="mb-2">Composio connected accounts</Text>
           {importable.length === 0 ? (
             <Text variant="secondary">
-              No active Composio accounts for supported platforms. Connect apps in your Composio dashboard, then refresh this page.
+              No active Composio accounts yet — use the buttons above to connect a platform.
             </Text>
           ) : (
             <div className="divide-y divide-kumo-line">

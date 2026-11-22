@@ -109,24 +109,111 @@ function handleWordpress(req, res, path, body) {
 }
 
 const COMPOSIO_ACCOUNTS = [
-  { id: "ca_twitter_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Mock X", word_id: null },
-  { id: "ca_linkedin_1", toolkit: { slug: "LINKEDIN" }, status: "ACTIVE", alias: "Mock LinkedIn", word_id: null },
-  { id: "ca_instagram_1", toolkit: { slug: "INSTAGRAM" }, status: "ACTIVE", alias: "Mock IG", word_id: null },
-  { id: "ca_telegram_1", toolkit: { slug: "TELEGRAM" }, status: "ACTIVE", alias: "Mock Tg", word_id: null },
-  { id: "ca_facebook_1", toolkit: { slug: "FACEBOOK" }, status: "ACTIVE", alias: "Mock FB Page", word_id: null },
-  { id: "ca_threads_1", toolkit: { slug: "THREADS" }, status: "ACTIVE", alias: "Mock Threads", word_id: null },
-  { id: "ca_reddit_1", toolkit: { slug: "REDDIT" }, status: "ACTIVE", alias: "Mock Reddit", word_id: null },
-  { id: "ca_github_1", toolkit: { slug: "GITHUB" }, status: "ACTIVE", alias: "Mock GitHub", word_id: null }, // unsupported in Postflare
+  { id: "ca_twitter_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Mock X", word_id: null, user_id: "postflare" },
+  { id: "ca_linkedin_1", toolkit: { slug: "LINKEDIN" }, status: "ACTIVE", alias: "Mock LinkedIn", word_id: null, user_id: "postflare" },
+  { id: "ca_instagram_1", toolkit: { slug: "INSTAGRAM" }, status: "ACTIVE", alias: "Mock IG", word_id: null, user_id: "postflare" },
+  { id: "ca_telegram_1", toolkit: { slug: "TELEGRAM" }, status: "ACTIVE", alias: "Mock Tg", word_id: null, user_id: "postflare" },
+  { id: "ca_facebook_1", toolkit: { slug: "FACEBOOK" }, status: "ACTIVE", alias: "Mock FB Page", word_id: null, user_id: "postflare" },
+  { id: "ca_threads_1", toolkit: { slug: "THREADS" }, status: "ACTIVE", alias: "Mock Threads", word_id: null, user_id: "postflare" },
+  { id: "ca_reddit_1", toolkit: { slug: "REDDIT" }, status: "ACTIVE", alias: "Mock Reddit", word_id: null, user_id: "postflare" },
+  { id: "ca_github_1", toolkit: { slug: "GITHUB" }, status: "ACTIVE", alias: "Mock GitHub", word_id: null, user_id: "postflare" }, // unsupported in Postflare
+  // A connection created elsewhere (different user) — must NOT be listed
+  // when Postflare filters by its own user, "postflare".
+  { id: "ca_dash_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Dashboard X", word_id: null, user_id: "someone_else" },
 ];
 
+// Auth configs per toolkit (id → toolkit), as Composio's managed defaults.
+const COMPOSIO_AUTH_CONFIGS = {
+  TWITTER: "ac_twitter",
+  INSTAGRAM: "ac_instagram",
+  FACEBOOK: "ac_facebook",
+  LINKEDIN: "ac_linkedin",
+  THREADS: "ac_threads",
+  REDDIT: "ac_reddit",
+  TELEGRAM: "ac_telegram",
+};
+
+// Accounts created through the link flow (the auth gateway).
+const dynamicAccounts = [];
+let dynamicCounter = 0;
+
+function allComposioAccounts() {
+  return [...COMPOSIO_ACCOUNTS, ...dynamicAccounts];
+}
+
 function filterComposioAccounts(url) {
+  let accounts = allComposioAccounts();
   const ids = url.searchParams.get("connected_account_ids");
-  if (!ids) return COMPOSIO_ACCOUNTS;
-  const wanted = ids.split(",");
-  return COMPOSIO_ACCOUNTS.filter((a) => wanted.includes(a.id));
+  if (ids) {
+    const wanted = ids.split(",");
+    accounts = accounts.filter((a) => wanted.includes(a.id));
+  }
+  const userIds = url.searchParams.get("user_ids");
+  if (userIds) {
+    const wanted = userIds.split(",");
+    accounts = accounts.filter((a) => wanted.includes(a.user_id));
+  }
+  return accounts;
 }
 
 function handleComposio(req, res, path, body, url) {
+  // Auth-config listing: used to resolve the toolkit's enabled config.
+  if (path === "/auth_configs") {
+    const slugs = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);
+    const items = slugs
+      .filter((s) => COMPOSIO_AUTH_CONFIGS[s])
+      .map((s) => ({
+        id: COMPOSIO_AUTH_CONFIGS[s],
+        name: `${s} managed`,
+        type: "default",
+        toolkit: { slug: s },
+        auth_scheme: "OAUTH2",
+        is_composio_managed: true,
+        status: "ENABLED",
+        no_of_connections: 0,
+      }));
+    return json(res, 200, { items, next_cursor: null, total_items: items.length, current_page: 1, total_pages: 1 });
+  }
+
+  // The auth gateway link: creates a pending account under the given user and
+  // returns Composio's hosted authorization URL.
+  if (req.method === "POST" && path === "/connected_accounts/link") {
+    const toolkitSlug = Object.keys(COMPOSIO_AUTH_CONFIGS).find(
+      (s) => COMPOSIO_AUTH_CONFIGS[s] === body.auth_config_id,
+    );
+    if (!toolkitSlug) {
+      return json(res, 400, { error: { message: "Unknown auth config id", code: 400, slug: "bad_request", status: 400 } });
+    }
+    dynamicCounter += 1;
+    const id = `ca_new_${dynamicCounter}`;
+    dynamicAccounts.push({
+      id,
+      toolkit: { slug: toolkitSlug },
+      status: "INITIALIZING",
+      alias: `New ${toolkitSlug} ${dynamicCounter}`,
+      word_id: null,
+      user_id: body.user_id ?? "postflare",
+      callback_url: body.callback_url ?? null,
+    });
+    return json(res, 201, {
+      link_token: `lt_${id}`,
+      redirect_url: `http://localhost:${PORT}/composio/api/v3.1/auth/complete?account_id=${id}`,
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      connected_account_id: id,
+    });
+  }
+
+  // Simulated completion of Composio's hosted OAuth: flips the account ACTIVE
+  // and redirects the browser back to the app's callback URL.
+  if (req.method === "GET" && path === "/auth/complete") {
+    const id = url.searchParams.get("account_id");
+    const account = dynamicAccounts.find((a) => a.id === id);
+    if (!account) return json(res, 404, { error: { message: "Unknown pending account", code: 404, slug: "not_found", status: 404 } });
+    account.status = "ACTIVE";
+    res.writeHead(302, { location: account.callback_url ?? "/" });
+    return res.end();
+  }
+
   if (path === "/connected_accounts") {
     const items = filterComposioAccounts(url);
     return json(res, 200, { items, next_cursor: null, total_items: items.length, current_page: 1, total_pages: 1 });
@@ -161,6 +248,8 @@ const server = createServer(async (req, res) => {
     state.wordpress.posts.length = 0;
     state.webhook.length = 0;
     state.composio.actions.length = 0;
+    dynamicAccounts.length = 0;
+    dynamicCounter = 0;
     counters = { bluesky: 0, mastodon: 0, telegram: 0, wordpress: 0 };
     return json(res, 200, { ok: true });
   }

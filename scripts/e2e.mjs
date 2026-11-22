@@ -551,6 +551,64 @@ async function runSuite() {
     assert(publish && publish.args.creation_id === "17890000000000001", "publish tool called with the container id");
   });
 
+  // ---- Composio auth gateway (Postflare user, hosted authorization) --------------
+  await test("auth gateway initiates a link under the postflare user", async () => {
+    const conn = ok(await api("POST", "/api/composio/connect", { body: { providerId: "x" }, workspaceId: ws }));
+    const { redirectUrl, composioAccountId } = conn.data.data;
+    assert(composioAccountId && composioAccountId.startsWith("ca_new_"), "link created a composio account");
+    assert(new URL(redirectUrl).host === new URL(MOCK_URL).host, "redirects to the hosted auth page");
+
+    // Simulate the user completing authorization on Composio's hosted page.
+    const complete = await fetch(redirectUrl, { redirect: "manual" });
+    assert(complete.status === 302, `auth completion redirects, got ${complete.status}`);
+    const location = complete.headers.get("location") ?? "";
+    assert(location.startsWith(WORKER_URL) && location.includes("composio=connected&provider=x"), `callback returns to postflare: ${location}`);
+  });
+  await test("gateway account is listed, dashboard account is not (user filter)", async () => {
+    const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws }));
+    const items = list.data.data;
+    const fresh = items.find((a) => a.id === "ca_new_1");
+    assert(fresh && fresh.status === "ACTIVE" && fresh.providerId === "x", "new gateway account active and mapped");
+    assert(!items.some((a) => a.alias === "Dashboard X"), "accounts from other composio users are excluded");
+  });
+  await test("gateway account imports + publishes end-to-end", async () => {
+    const imp = ok(await api("POST", "/api/composio/import", {
+      body: { composioAccountId: "ca_new_1", providerId: "x", accountName: "Gateway X" },
+      workspaceId: ws,
+    }));
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "x", text: "Gateway publish" }],
+        accountIds: [imp.data.data.accountId],
+        publishNow: true,
+      },
+    }));
+    const id = r.data.data.id;
+    await waitFor(async () => {
+      const p = ok(await api("GET", "/api/posts", { workspaceId: ws }));
+      const post = p.data.data.items.find((x) => x.id === id);
+      return ["published", "failed"].includes(post?.status) ? post : null;
+    }, 40000);
+    const inspect = await (await fetch(`${MOCK_URL}/__inspect`)).json();
+    const action = inspect.composio.actions.filter((a) => a.slug === "TWITTER_CREATION_OF_A_POST").pop();
+    assert(action && action.connected_account_id === "ca_new_1", "publish ran through the gateway account");
+  });
+  await test("gateway guards: unsupported platform and missing key", async () => {
+    const unsupported = await api("POST", "/api/composio/connect", { body: { providerId: "bluesky" }, workspaceId: ws });
+    assert(unsupported.status === 400, `expected 400 for unsupported platform, got ${unsupported.status}`);
+    // Missing key: a workspace with no composio key configured (second user's fresh workspace).
+    cookie = ""; // start without a session
+    ok(await api("POST", "/api/auth/register", { body: { email: `gw${Date.now()}@e2e.dev`, name: "GW", password: "password123" } }));
+    const me2 = ok(await api("GET", "/api/auth/me"));
+    const ws2 = me2.data.data.workspaces[0].id;
+    const noKey = await api("POST", "/api/composio/connect", { body: { providerId: "x" }, workspaceId: ws2 });
+    assert(noKey.status === 400, `expected 400 without composio key, got ${noKey.status}`);
+    // Restore the original session for the remaining tests.
+    cookie = "";
+    ok(await api("POST", "/api/auth/login", { body: { email: "e2e@example.com", password: "password123" } }));
+  });
+
   // ---- Quick automation attach (composer) ---------------------------------------
   await test("attach a template while composing instantiates + publishes the automation", async () => {
     const r = ok(await api("POST", "/api/posts", {
