@@ -564,6 +564,46 @@ async function runSuite() {
     const location = complete.headers.get("location") ?? "";
     assert(location.startsWith(WORKER_URL) && location.includes("composio=connected&provider=x"), `callback returns to postflare: ${location}`);
   });
+  await test("gateway auto-enables a missing managed auth config (no dashboard)", async () => {
+    // INSTAGRAM starts with NO auth config in the mock — connecting must
+    // create a Composio-managed one via the API and then link under it.
+    const conn = ok(await api("POST", "/api/composio/connect", { body: { providerId: "instagram" }, workspaceId: ws }));
+    const igAccountId = conn.data.data.composioAccountId;
+    assert(igAccountId && igAccountId.startsWith("ca_new_"), "link created after auto-enabling");
+
+    const inspect = await (await fetch(`${MOCK_URL}/__inspect`)).json();
+    const creation = inspect.composio.authConfigCreations.find((c) => c.slug === "INSTAGRAM");
+    assert(creation && creation.type === "use_composio_managed_auth", "managed auth config created via the API");
+
+    // Complete the hosted authorization and import the account.
+    const complete = await fetch(conn.data.data.redirectUrl, { redirect: "manual" });
+    assert(complete.status === 302, `auth completion redirects, got ${complete.status}`);
+    const imp = ok(await api("POST", "/api/composio/import", {
+      body: { composioAccountId: igAccountId, providerId: "instagram", accountName: "Gateway IG" },
+      workspaceId: ws,
+    }));
+
+    // Publish media through it — the Instagram two-step tool flow.
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "instagram", text: "Auto-enabled IG caption", mediaIds: [mediaId] }],
+        accountIds: [imp.data.data.accountId],
+        publishNow: true,
+      },
+    }));
+    const id = r.data.data.id;
+    await waitFor(async () => {
+      const p = ok(await api("GET", "/api/posts", { workspaceId: ws }));
+      const post = p.data.data.items.find((x) => x.id === id);
+      return ["published", "failed"].includes(post?.status) ? post : null;
+    }, 40000);
+    const inspect2 = await (await fetch(`${MOCK_URL}/__inspect`)).json();
+    const container = inspect2.composio.actions.filter((a) => a.slug === "INSTAGRAM_POST_IG_USER_MEDIA").pop();
+    assert(container && container.connected_account_id === igAccountId, "container tool ran on the gateway account");
+    const publish = inspect2.composio.actions.filter((a) => a.slug === "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH").pop();
+    assert(publish && publish.connected_account_id === igAccountId, "publish tool ran on the gateway account");
+  });
   await test("gateway account is listed, dashboard account is not (user filter)", async () => {
     const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws }));
     const items = list.data.data;

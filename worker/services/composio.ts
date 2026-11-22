@@ -120,7 +120,9 @@ export async function initiateComposioConnection(
   const apiKey = await getComposioApiKey(env, workspaceId);
   if (!apiKey) throw badRequest("Configure the Composio API key first");
 
-  // 1. Find an enabled auth config for the toolkit (Composio-managed works).
+  // 1. Find an enabled auth config for the toolkit — or create a
+  //    Composio-managed one ourselves, so the user never has to open the
+  //    Composio dashboard at all.
   const cfgRes = await composioFetch<{ items?: AuthConfigItem[] }>(
     env,
     apiKey,
@@ -129,11 +131,31 @@ export async function initiateComposioConnection(
   if (cfgRes.status !== 200 || !cfgRes.json) {
     throw badRequest(`Could not read Composio auth configs (HTTP ${cfgRes.status})`);
   }
-  const config = (cfgRes.json.items ?? []).find((c) => (c.status ?? "ENABLED") === "ENABLED");
+  let config = (cfgRes.json.items ?? []).find((c) => (c.status ?? "ENABLED") === "ENABLED");
+
   if (!config) {
-    throw badRequest(
-      `No enabled Composio auth config for ${support.toolkit}. Enable the toolkit's connection in your Composio project settings first.`,
-    );
+    const createRes = await composioFetch<{
+      auth_config?: { id?: string };
+      error?: { message?: string };
+    }>(env, apiKey, "/auth_configs", {
+      method: "POST",
+      body: JSON.stringify({
+        toolkit: { slug: support.toolkit },
+        auth_config: {
+          type: "use_composio_managed_auth",
+          credentials: {},
+          restrict_to_following_tools: [],
+        },
+      }),
+    });
+    const createdId = createRes.json?.auth_config?.id;
+    if (createRes.status !== 201 || !createdId) {
+      const message =
+        createRes.json?.error?.message ??
+        `Could not enable ${support.toolkit} through Composio (HTTP ${createRes.status})`;
+      throw badRequest(message);
+    }
+    config = { id: createdId, status: "ENABLED" };
   }
 
   // 2. Create the link under the Postflare user with a callback back here.

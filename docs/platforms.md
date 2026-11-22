@@ -26,19 +26,23 @@ first-party toolkits for them, so Postflare does not pretend otherwise.
 
 ### Composio auth gateway
 
-You never need to create connections in the Composio dashboard. From
-Postflare (Settings → Integrations → Composio panel, or a platform's configure
-page), clicking **Connect via Composio**:
+You never need to open the Composio dashboard. From Postflare (Settings →
+Integrations → Composio panel, or a platform's configure page), clicking
+**Connect via Composio** handles everything automatically:
 
-1. resolves the toolkit's enabled Composio auth config (`GET /auth_configs`),
-2. creates a link under the **Postflare user** (`user_id: "postflare"`) via
-   `POST /connected_accounts/link` with a callback back to Postflare,
+1. finds the toolkit's enabled Composio auth config — and if the project has
+   none, **creates a Composio-managed one itself** via `POST /auth_configs`
+   (`type: use_composio_managed_auth`),
+2. creates a link under the **Postflare user** (`user_id: "postflare"` —
+   Composio creates the user on first use) via `POST /connected_accounts/link`
+   with a callback back to Postflare,
 3. redirects you to Composio's hosted authorization page,
 4. on return, the new account is auto-imported (Facebook/Reddit/Telegram ask
    for their required per-account setting: Page ID, subreddit, chat ID).
 
-Account listings are filtered to `user_ids=postflare`, so connections made
-elsewhere in your Composio project are never picked up.
+Only a Composio project API key is needed. Account listings are filtered to
+`user_ids=postflare`, so connections made elsewhere in your Composio project
+are never picked up.
 
 ## Adapter implementation status
 

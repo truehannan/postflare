@@ -171,7 +171,7 @@ export function ComposioPanel() {
         <div className="mt-5 border-t border-kumo-line pt-4">
           <Text DANGEROUS_className="mb-1">Connect a new account</Text>
           <Text variant="secondary" DANGEROUS_className="mb-2 block max-w-xl">
-            Authorize each platform on Composio's hosted page — no developer credentials and nothing to configure in the Composio dashboard. Connections are created under your Postflare Composio user and appear below.
+            Everything is handled for you — the toolkit's auth config, the Postflare Composio user and the hosted authorization are set up automatically when you click. No developer credentials and nothing to configure in the Composio dashboard.
           </Text>
           <div className="flex flex-wrap gap-1.5">
             {status.supported.map((s) => {

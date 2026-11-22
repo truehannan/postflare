@@ -18,7 +18,7 @@ const state = {
   telegram: { messages: [] },
   wordpress: { posts: [] },
   webhook: [],
-  composio: { actions: [] },
+  composio: { actions: [], authConfigCreations: [] },
 };
 
 let counters = { bluesky: 0, mastodon: 0, telegram: 0, wordpress: 0 };
@@ -133,6 +133,26 @@ const COMPOSIO_AUTH_CONFIGS = {
   TELEGRAM: "ac_telegram",
 };
 
+// Mutable auth-config registry. INSTAGRAM starts WITHOUT a config so the
+// auto-enable path (POST /auth_configs with use_composio_managed_auth) is
+// exercised by the e2e suite — mirroring a fresh Composio project.
+const authConfigs = {};
+for (const [slug, id] of Object.entries(COMPOSIO_AUTH_CONFIGS)) {
+  if (slug !== "INSTAGRAM") {
+    authConfigs[slug] = {
+      id,
+      name: `${slug} managed`,
+      type: "default",
+      toolkit: { slug },
+      auth_scheme: "OAUTH2",
+      is_composio_managed: true,
+      status: "ENABLED",
+      no_of_connections: 0,
+    };
+  }
+}
+let authConfigCounter = 0;
+
 // Accounts created through the link flow (the auth gateway).
 const dynamicAccounts = [];
 let dynamicCounter = 0;
@@ -158,29 +178,48 @@ function filterComposioAccounts(url) {
 
 function handleComposio(req, res, path, body, url) {
   // Auth-config listing: used to resolve the toolkit's enabled config.
-  if (path === "/auth_configs") {
+  if (req.method === "GET" && path === "/auth_configs") {
     const slugs = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);
-    const items = slugs
-      .filter((s) => COMPOSIO_AUTH_CONFIGS[s])
-      .map((s) => ({
-        id: COMPOSIO_AUTH_CONFIGS[s],
-        name: `${s} managed`,
-        type: "default",
-        toolkit: { slug: s },
-        auth_scheme: "OAUTH2",
-        is_composio_managed: true,
-        status: "ENABLED",
-        no_of_connections: 0,
-      }));
+    const showDisabled = url.searchParams.get("show_disabled") === "true";
+    let items = Object.values(authConfigs);
+    if (slugs.length) items = items.filter((c) => slugs.includes(c.toolkit.slug));
+    if (!showDisabled) items = items.filter((c) => c.status === "ENABLED");
     return json(res, 200, { items, next_cursor: null, total_items: items.length, current_page: 1, total_pages: 1 });
+  }
+
+  // Auth-config creation: the auto-enable path Postflare uses so users never
+  // touch the Composio dashboard (Composio-managed auth only).
+  if (req.method === "POST" && path === "/auth_configs") {
+    const slug = body?.toolkit?.slug;
+    const type = body?.auth_config?.type;
+    if (!slug || !COMPOSIO_AUTH_CONFIGS[slug]) {
+      return json(res, 400, { error: { message: "Unknown toolkit slug", code: 400, slug: "bad_request", status: 400 } });
+    }
+    if (type !== "use_composio_managed_auth") {
+      return json(res, 400, { error: { message: "Mock only supports use_composio_managed_auth", code: 400, slug: "bad_request", status: 400 } });
+    }
+    state.composio.authConfigCreations.push({ slug, type });
+    authConfigCounter += 1;
+    const created = {
+      id: `ac_${slug.toLowerCase()}_managed_${authConfigCounter}`,
+      name: `${slug} managed (auto-enabled)`,
+      type: "default",
+      toolkit: { slug },
+      auth_scheme: "OAUTH2",
+      is_composio_managed: true,
+      status: "ENABLED",
+      no_of_connections: 0,
+    };
+    authConfigs[slug] = created;
+    return json(res, 201, { toolkit: { slug }, auth_config: created });
   }
 
   // The auth gateway link: creates a pending account under the given user and
   // returns Composio's hosted authorization URL.
   if (req.method === "POST" && path === "/connected_accounts/link") {
-    const toolkitSlug = Object.keys(COMPOSIO_AUTH_CONFIGS).find(
-      (s) => COMPOSIO_AUTH_CONFIGS[s] === body.auth_config_id,
-    );
+    const toolkitSlug = Object.values(authConfigs).find(
+      (c) => c.id === body.auth_config_id,
+    )?.toolkit?.slug;
     if (!toolkitSlug) {
       return json(res, 400, { error: { message: "Unknown auth config id", code: 400, slug: "bad_request", status: 400 } });
     }
@@ -248,7 +287,25 @@ const server = createServer(async (req, res) => {
     state.wordpress.posts.length = 0;
     state.webhook.length = 0;
     state.composio.actions.length = 0;
+    state.composio.authConfigCreations.length = 0;
     dynamicAccounts.length = 0;
+    // Restore the registry: everything enabled except INSTAGRAM (auto-enable case).
+    for (const key of Object.keys(authConfigs)) delete authConfigs[key];
+    for (const [slug, id] of Object.entries(COMPOSIO_AUTH_CONFIGS)) {
+      if (slug !== "INSTAGRAM") {
+        authConfigs[slug] = {
+          id,
+          name: `${slug} managed`,
+          type: "default",
+          toolkit: { slug },
+          auth_scheme: "OAUTH2",
+          is_composio_managed: true,
+          status: "ENABLED",
+          no_of_connections: 0,
+        };
+      }
+    }
+    authConfigCounter = 0;
     dynamicCounter = 0;
     counters = { bluesky: 0, mastodon: 0, telegram: 0, wordpress: 0 };
     return json(res, 200, { ok: true });
