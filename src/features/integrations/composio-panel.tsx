@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Input, Surface, Text } from "@cloudflare/kumo";
 import { DownloadSimple, Key, Lightning, PlugsConnected } from "@phosphor-icons/react";
@@ -18,8 +18,34 @@ interface RemoteAccount {
   toolkit: string;
   providerId: string | null;
   status: string;
+  statusReason: string | null;
   name: string;
   imported: boolean;
+}
+
+const PENDING_KEY = "pf-composio-pending";
+
+interface PendingConnection {
+  providerId: string;
+  composioAccountId: string;
+  startedAt: number;
+}
+
+function readPending(): PendingConnection | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY);
+    return raw ? (JSON.parse(raw) as PendingConnection) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearPending() {
+  try {
+    sessionStorage.removeItem(PENDING_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function ComposioPanel() {
@@ -30,8 +56,8 @@ export function ComposioPanel() {
   const [importTarget, setImportTarget] = useState<RemoteAccount | null>(null);
   const [importName, setImportName] = useState("");
   const [importConfig, setImportConfig] = useState<Record<string, string>>({});
-  const [returnProvider, setReturnProvider] = useState<string | null>(null);
-  const returnDeadline = useRef(0);
+  const [pending, setPending] = useState<PendingConnection | null>(() => readPending());
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
 
   const { data: status } = useQuery({
     queryKey: ["composio-status"],
@@ -39,10 +65,31 @@ export function ComposioPanel() {
   });
   const { data: remoteAccounts } = useQuery({
     queryKey: ["composio-accounts"],
-    queryFn: () => api.get<RemoteAccount[]>("/api/composio/connected-accounts"),
+    queryFn: () => api.get<{ items: RemoteAccount[]; scope: "user" | "all" }>("/api/composio/connected-accounts"),
     enabled: !!status?.configured,
-    // While waiting for a gateway return, poll until the new account is ACTIVE.
-    refetchInterval: returnProvider ? 3000 : false,
+  });
+
+  // Poll the exact pending connection by its Composio id — deterministic, and
+  // it survives refreshes because the id lives in sessionStorage.
+  const { data: pendingPoll } = useQuery({
+    queryKey: ["composio-connection-status", pending?.composioAccountId],
+    queryFn: () =>
+      api.get<{
+        id: string;
+        status: string;
+        statusReason: string | null;
+        providerId: string | null;
+        name: string;
+        imported: boolean;
+      }>(`/api/composio/connection-status?id=${encodeURIComponent(pending!.composioAccountId)}`),
+    enabled: !!status?.configured && !!pending,
+    refetchInterval: (query) => {
+      const data = query.state.data as { status?: string } | undefined;
+      if (data && ["ACTIVE", "FAILED", "EXPIRED", "REVOKED", "NOT_FOUND"].includes(data.status ?? "")) {
+        return false;
+      }
+      return 3000;
+    },
   });
 
   const saveKey = useMutation({
@@ -57,24 +104,76 @@ export function ComposioPanel() {
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Could not save the Composio key"),
   });
 
-  // Detect the return from Composio's hosted authorization and pick the flow
-  // back up. Composio may take a few seconds to flip the account to ACTIVE, so
-  // poll (see refetchInterval) until it appears — then auto-import or open the
-  // config modal for platforms that need one (FB Page, subreddit, chat ID).
+  // Resume/complete the pending connection as soon as its status resolves.
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("composio") !== "connected") return;
-    const provider = params.get("provider");
-    window.history.replaceState({}, "", window.location.pathname);
-    returnDeadline.current = Date.now() + 45_000;
-    setReturnProvider(provider ?? "");
-    setMessage("Composio authorization completed — finishing the connection…");
-  }, []);
+    if (!pending || !pendingPoll || !status) return;
+    setPendingStatus(pendingPoll.status);
+    if (pendingPoll.imported) {
+      clearPending();
+      setPending(null);
+      setMessage("Account connected.");
+      queryClient.invalidateQueries({ queryKey: ["composio-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      return;
+    }
+    if (pendingPoll.status === "ACTIVE") {
+      const needsConfig = (status.supported.find((s) => s.platformId === pending.providerId)?.accountConfigFields ?? []).some(
+        (f) => f.required,
+      );
+      clearPending();
+      setPending(null);
+      if (needsConfig) {
+        setImportTarget({
+          id: pendingPoll.id,
+          toolkit: "",
+          providerId: pending.providerId,
+          status: pendingPoll.status,
+          statusReason: pendingPoll.statusReason,
+          name: pendingPoll.name,
+          imported: false,
+        });
+        setImportConfig({});
+        setMessage("Composio authorization completed — finish importing the account.");
+      } else {
+        autoImport.mutate({
+          id: pendingPoll.id,
+          toolkit: "",
+          providerId: pending.providerId,
+          status: pendingPoll.status,
+          statusReason: pendingPoll.statusReason,
+          name: pendingPoll.name,
+          imported: false,
+        });
+      }
+      return;
+    }
+    if (["FAILED", "EXPIRED", "REVOKED", "NOT_FOUND"].includes(pendingPoll.status)) {
+      clearPending();
+      setPending(null);
+      setError(
+        `The Composio connection did not complete (status: ${pendingPoll.status}` +
+          `${pendingPoll.statusReason ? ` — ${pendingPoll.statusReason}` : ""}). Try connecting again.`,
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingPoll]);
 
   const connect = useMutation({
     mutationFn: (providerId: string) =>
       api.post<{ redirectUrl: string; composioAccountId: string | null; providerId: string }>("/api/composio/connect", { providerId }),
     onSuccess: (r) => {
+      // Remember the exact account Composio created, so the connection can be
+      // finished deterministically on return (even after a refresh).
+      if (r.composioAccountId) {
+        try {
+          sessionStorage.setItem(
+            PENDING_KEY,
+            JSON.stringify({ providerId: r.providerId, composioAccountId: r.composioAccountId, startedAt: Date.now() }),
+          );
+        } catch {
+          /* storage unavailable — the list fallback still works */
+        }
+      }
       // Send the user to Composio's hosted authorization page.
       window.location.assign(r.redirectUrl);
     },
@@ -92,36 +191,6 @@ export function ComposioPanel() {
     },
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Import failed"),
   });
-
-  // Once the new account becomes ACTIVE after a gateway return, finish the
-  // import. Polls until it shows up or the deadline passes.
-  useEffect(() => {
-    if (returnProvider === null || !remoteAccounts) return;
-    const target = remoteAccounts.find(
-      (a) => a.providerId === returnProvider && a.status === "ACTIVE" && !a.imported,
-    );
-    if (target) {
-      setReturnProvider(null);
-      const needsConfig = (status?.supported.find((s) => s.platformId === target.providerId)?.accountConfigFields ?? []).some(
-        (f) => f.required,
-      );
-      if (needsConfig) {
-        setImportTarget(target);
-        setImportConfig({});
-        setMessage("Composio authorization completed — finish importing the account.");
-      } else {
-        autoImport.mutate(target);
-      }
-      return;
-    }
-    if (Date.now() > returnDeadline.current) {
-      setReturnProvider(null);
-      setMessage(
-        "Composio authorization completed, but the account is not active yet. It will appear in the list below as soon as Composio finishes — then press Import.",
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [returnProvider, remoteAccounts]);
 
   const importAccount = useMutation({
     mutationFn: (target: RemoteAccount) =>
@@ -202,19 +271,34 @@ export function ComposioPanel() {
         </div>
       )}
 
+      {pending && (
+        <div className="mt-4 rounded-lg bg-kumo-recessed p-3">
+          <div className="flex items-center gap-2">
+            <Badge variant="info">Waiting for Composio</Badge>
+            <Text variant="secondary">
+              {pendingStatus === "INITIATED"
+                ? "The authorization was started but not completed on Composio's page. Finish it there, or reconnect."
+                : `Connection status: ${pendingStatus ?? "checking…"}`}
+            </Text>
+          </div>
+        </div>
+      )}
+
       {status?.configured && (
         <div className="mt-5 border-t border-kumo-line pt-4">
           <div className="mb-2 flex items-center justify-between">
             <Text DANGEROUS_className="">Composio connected accounts</Text>
-            {returnProvider !== null && <Badge variant="info">Waiting for the account to become active…</Badge>}
+            {remoteAccounts?.scope === "all" && (
+              <Badge variant="warning">No accounts under the Postflare user — showing all project accounts</Badge>
+            )}
           </div>
-          {(remoteAccounts ?? []).filter((a) => a.providerId).length === 0 ? (
+          {(remoteAccounts?.items ?? []).filter((a) => a.providerId).length === 0 ? (
             <Text variant="secondary">
               No Composio accounts yet — use the buttons above to connect a platform.
             </Text>
           ) : (
             <div className="divide-y divide-kumo-line">
-              {(remoteAccounts ?? []).filter((a) => a.providerId).map((a) => {
+              {(remoteAccounts?.items ?? []).filter((a) => a.providerId).map((a) => {
                 const platform = getPlatform(a.providerId!);
                 const isActive = a.status === "ACTIVE";
                 return (

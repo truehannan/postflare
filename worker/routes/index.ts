@@ -157,6 +157,12 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
     const list = await composio.listComposioAccounts(c.env, c.get("workspace").workspaceId);
     return jsonOk(c, list);
   });
+  composioRoutes.get("/connection-status", async (c) => {
+    const id = c.req.query("id");
+    if (!id) throw badRequest("Missing id query parameter");
+    const status = await composio.getComposioConnectionStatus(c.env, c.get("workspace").workspaceId, id);
+    return jsonOk(c, status);
+  });
   composioRoutes.post("/connect", async (c) => {
     const input = await parseJson(c, z.object({ providerId: z.string().min(1) }));
     const origin = new URL(c.req.url).origin;

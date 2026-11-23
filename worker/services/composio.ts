@@ -85,6 +85,7 @@ export async function testComposioKey(env: Env, apiKey: string): Promise<{ ok: b
 interface ComposioAccountItem {
   id: string;
   status: string;
+  status_reason?: string | null;
   alias: string | null;
   word_id: string | null;
   user_id?: string;
@@ -189,14 +190,41 @@ export interface ComposioRemoteAccount {
   toolkit: string;
   providerId: string | null;
   status: string;
+  statusReason: string | null;
   name: string;
   imported: boolean;
 }
 
-/** List Composio connected accounts that map to supported Postflare platforms. */
-export async function listComposioAccounts(env: Env, workspaceId: string): Promise<ComposioRemoteAccount[]> {
+/**
+ * List Composio connected accounts that map to supported Postflare platforms.
+ * Scoped to the Postflare user; if that filter matches nothing, falls back to
+ * all project accounts (scope "all") so connections are never silently hidden.
+ */
+export async function listComposioAccounts(
+  env: Env,
+  workspaceId: string,
+): Promise<{ items: ComposioRemoteAccount[]; scope: "user" | "all" }> {
   const apiKey = await getComposioApiKey(env, workspaceId);
   if (!apiKey) throw badRequest("Configure the Composio API key first");
+
+  const importedRows = await env.DB.prepare(
+    "SELECT external_id FROM connected_accounts WHERE workspace_id = ? AND connection_mode = 'composio'",
+  ).bind(workspaceId).all<{ external_id: string }>();
+  const imported = new Set((importedRows.results ?? []).map((r) => r.external_id));
+
+  const mapItems = (items: ComposioAccountItem[]): ComposioRemoteAccount[] =>
+    items.map((item) => {
+      const support = COMPOSIO_SUPPORTED.find((s) => s.toolkit === item.toolkit?.slug);
+      return {
+        id: item.id,
+        toolkit: item.toolkit?.slug ?? "",
+        providerId: support?.platformId ?? null,
+        status: item.status,
+        statusReason: item.status_reason ?? null,
+        name: item.alias || item.word_id || item.toolkit?.slug || item.id,
+        imported: imported.has(item.id),
+      };
+    });
 
   const res = await composioFetch<{ items?: (ComposioAccountItem & { user_id?: string })[] }>(
     env,
@@ -206,25 +234,91 @@ export async function listComposioAccounts(env: Env, workspaceId: string): Promi
   if (res.status !== 200 || !res.json) {
     throw badRequest(`Could not list Composio accounts (HTTP ${res.status})`);
   }
-
-  const importedRows = await env.DB.prepare(
-    "SELECT external_id FROM connected_accounts WHERE workspace_id = ? AND connection_mode = 'composio'",
-  ).bind(workspaceId).all<{ external_id: string }>();
-  const imported = new Set((importedRows.results ?? []).map((r) => r.external_id));
-
-  const out: ComposioRemoteAccount[] = [];
-  for (const item of res.json.items ?? []) {
-    const support = COMPOSIO_SUPPORTED.find((s) => s.toolkit === item.toolkit?.slug);
-    out.push({
-      id: item.id,
-      toolkit: item.toolkit?.slug ?? "",
-      providerId: support?.platformId ?? null,
-      status: item.status,
-      name: item.alias || item.word_id || item.toolkit?.slug || item.id,
-      imported: imported.has(item.id),
-    });
+  const userItems = res.json.items ?? [];
+  if (userItems.length > 0) {
+    return { items: mapItems(userItems), scope: "user" };
   }
-  return out;
+
+  // Nothing under the Postflare user — fall back to every project account so
+  // a connection never disappears just because of a user-id mismatch.
+  const allRes = await composioFetch<{ items?: ComposioAccountItem[] }>(
+    env,
+    apiKey,
+    "/connected_accounts?limit=100",
+  );
+  if (allRes.status !== 200 || !allRes.json) {
+    throw badRequest(`Could not list Composio accounts (HTTP ${allRes.status})`);
+  }
+  return { items: mapItems(allRes.json.items ?? []), scope: "all" };
+}
+
+export interface ComposioConnectionStatus {
+  id: string;
+  status: string;
+  statusReason: string | null;
+  providerId: string | null;
+  name: string;
+  imported: boolean;
+}
+
+/**
+ * Poll a single pending Composio connection by its exact id — the
+ * deterministic path for finishing a gateway return. Serverless-friendly:
+ * each call is a stateless HTTP request.
+ */
+export async function getComposioConnectionStatus(
+  env: Env,
+  workspaceId: string,
+  composioAccountId: string,
+): Promise<ComposioConnectionStatus> {
+  const apiKey = await getComposioApiKey(env, workspaceId);
+  if (!apiKey) throw badRequest("Configure the Composio API key first");
+
+  const res = await composioFetch<ComposioAccountItem>(
+    env,
+    apiKey,
+    `/connected_accounts/${encodeURIComponent(composioAccountId)}`,
+  );
+  if (res.status === 404 || !res.json?.id) {
+    // Fall back to the list endpoint filtered by id (older API shapes).
+    const listRes = await composioFetch<{ items?: ComposioAccountItem[] }>(
+      env,
+      apiKey,
+      `/connected_accounts?connected_account_ids=${encodeURIComponent(composioAccountId)}`,
+    );
+    const item = listRes.json?.items?.[0];
+    if (!item) {
+      return {
+        id: composioAccountId,
+        status: "NOT_FOUND",
+        statusReason: "Composio does not know this connected account (wrong project or expired link).",
+        providerId: null,
+        name: composioAccountId,
+        imported: false,
+      };
+    }
+    return toStatus(env, workspaceId, item);
+  }
+  return toStatus(env, workspaceId, res.json);
+}
+
+async function toStatus(
+  env: Env,
+  workspaceId: string,
+  item: ComposioAccountItem,
+): Promise<ComposioConnectionStatus> {
+  const support = COMPOSIO_SUPPORTED.find((s) => s.toolkit === item.toolkit?.slug);
+  const importedRow = await env.DB.prepare(
+    "SELECT id FROM connected_accounts WHERE workspace_id = ? AND connection_mode = 'composio' AND external_id = ?",
+  ).bind(workspaceId, item.id).first<{ id: string }>();
+  return {
+    id: item.id,
+    status: item.status,
+    statusReason: item.status_reason ?? null,
+    providerId: support?.platformId ?? null,
+    name: item.alias || item.word_id || item.toolkit?.slug || item.id,
+    imported: !!importedRow,
+  };
 }
 
 export interface ImportComposioInput {

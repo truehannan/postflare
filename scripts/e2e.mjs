@@ -474,7 +474,8 @@ async function runSuite() {
   });
   await test("list Composio connected accounts (only supported platforms mapped)", async () => {
     const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws }));
-    const items = list.data.data;
+    const { items, scope } = list.data.data;
+    assert(scope === "user", "list is scoped to the postflare user");
     assert(items.length === 8, `expected 8 mock composio accounts, got ${items.length}`);
     const github = items.find((a) => a.toolkit === "GITHUB");
     assert(github && github.providerId === null, "unsupported toolkits are surfaced unmapped");
@@ -645,10 +646,48 @@ async function runSuite() {
   });
   await test("gateway account is listed, dashboard account is not (user filter)", async () => {
     const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws }));
-    const items = list.data.data;
+    const items = list.data.data.items;
     const fresh = items.find((a) => a.id === "ca_new_1");
     assert(fresh && fresh.status === "ACTIVE" && fresh.providerId === "x", "new gateway account active and mapped");
     assert(!items.some((a) => a.alias === "Dashboard X"), "accounts from other composio users are excluded");
+  });
+  await test("connection-status polls the exact account through its lifecycle", async () => {
+    // Initiate a new gateway link for Threads (config exists, no account yet).
+    const conn = ok(await api("POST", "/api/composio/connect", { body: { providerId: "threads" }, workspaceId: ws }));
+    const caId = conn.data.data.composioAccountId;
+
+    // Before completing the hosted auth: INITIALIZING, visible by exact id.
+    const before = ok(await api("GET", `/api/composio/connection-status?id=${encodeURIComponent(caId)}`, { workspaceId: ws }));
+    assert(before.data.data.status === "INITIALIZING", `pending status visible, got ${before.data.data.status}`);
+    assert(before.data.data.imported === false, "not yet imported");
+
+    // Complete the hosted authorization → ACTIVE.
+    await fetch(conn.data.data.redirectUrl, { redirect: "manual" });
+    const after = ok(await api("GET", `/api/composio/connection-status?id=${encodeURIComponent(caId)}`, { workspaceId: ws }));
+    assert(after.data.data.status === "ACTIVE", "status flips to ACTIVE after authorization");
+    assert(after.data.data.providerId === "threads", "toolkit mapped to the platform");
+  });
+  await test("failed authorization surfaces Composio's status reason", async () => {
+    const conn = ok(await api("POST", "/api/composio/connect", { body: { providerId: "x" }, workspaceId: ws }));
+    const caId = conn.data.data.composioAccountId;
+    await fetch(`${MOCK_URL}/composio/api/v3.1/auth/fail?account_id=${encodeURIComponent(caId)}`);
+    const status = ok(await api("GET", `/api/composio/connection-status?id=${encodeURIComponent(caId)}`, { workspaceId: ws }));
+    assert(status.data.data.status === "FAILED", "status is FAILED");
+    assert(status.data.data.statusReason === "user denied authorization", "status reason surfaced honestly");
+  });
+  await test("list falls back to all project accounts when the user filter is empty", async () => {
+    // A different workspace whose Composio key sees accounts only under other users.
+    cookie = "";
+    ok(await api("POST", "/api/auth/register", { body: { email: `fb${Date.now()}@e2e.dev`, name: "FB", password: "password123" } }));
+    const me3 = ok(await api("GET", "/api/auth/me"));
+    const ws3 = me3.data.data.workspaces[0].id;
+    ok(await api("PUT", "/api/composio/key", { body: { apiKey: "MOCK-COMPOSIO-KEY-ALLUSERS" }, workspaceId: ws3 }));
+    const list = ok(await api("GET", "/api/composio/connected-accounts", { workspaceId: ws3 }));
+    assert(list.data.data.scope === "all", "falls back to all project accounts");
+    assert(list.data.data.items.length > 0, "accounts are visible despite the user-id mismatch");
+    // Back to the main session.
+    cookie = "";
+    ok(await api("POST", "/api/auth/login", { body: { email: "e2e@example.com", password: "password123" } }));
   });
   await test("gateway account imports + publishes end-to-end", async () => {
     const imp = ok(await api("POST", "/api/composio/import", {

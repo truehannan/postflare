@@ -161,7 +161,7 @@ function allComposioAccounts() {
   return [...COMPOSIO_ACCOUNTS, ...dynamicAccounts];
 }
 
-function filterComposioAccounts(url) {
+function filterComposioAccounts(url, apiKey) {
   let accounts = allComposioAccounts();
   const ids = url.searchParams.get("connected_account_ids");
   if (ids) {
@@ -171,12 +171,21 @@ function filterComposioAccounts(url) {
   const userIds = url.searchParams.get("user_ids");
   if (userIds) {
     const wanted = userIds.split(",");
-    accounts = accounts.filter((a) => wanted.includes(a.user_id));
+    // The special key simulates a project where nothing lives under the
+    // "postflare" user — exercises the list fallback path.
+    const effective = apiKey === "MOCK-COMPOSIO-KEY-ALLUSERS" ? "someone_else" : null;
+    accounts = accounts.filter((a) => wanted.includes(effective ?? a.user_id));
   }
   return accounts;
 }
 
-function handleComposio(req, res, path, body, url) {
+function findComposioAccount(path) {
+  const byId = path.match(/^\/connected_accounts\/([^/]+)$/);
+  if (!byId) return null;
+  return allComposioAccounts().find((a) => a.id === byId[1]) ?? null;
+}
+
+function handleComposio(req, res, path, body, url, apiKey) {
   // Auth-config listing: used to resolve the toolkit's enabled config.
   if (req.method === "GET" && path === "/auth_configs") {
     const slugs = (url.searchParams.get("toolkit_slug") ?? "").split(",").filter(Boolean);
@@ -249,12 +258,33 @@ function handleComposio(req, res, path, body, url) {
     const account = dynamicAccounts.find((a) => a.id === id);
     if (!account) return json(res, 404, { error: { message: "Unknown pending account", code: 404, slug: "not_found", status: 404 } });
     account.status = "ACTIVE";
+    account.status_reason = null;
     res.writeHead(302, { location: account.callback_url ?? "/" });
     return res.end();
   }
 
+  // Simulated failed authorization (user denies on the hosted page).
+  if (req.method === "GET" && path === "/auth/fail") {
+    const id = url.searchParams.get("account_id");
+    const account = dynamicAccounts.find((a) => a.id === id);
+    if (account) {
+      account.status = "FAILED";
+      account.status_reason = "user denied authorization";
+    }
+    return json(res, 200, { ok: true });
+  }
+
+  // Single-account lookup by exact id (the deterministic polling endpoint).
+  if (req.method === "GET" && path.startsWith("/connected_accounts/") && !path.includes("link")) {
+    const account = findComposioAccount(path);
+    if (!account) {
+      return json(res, 404, { error: { message: "Connected account not found", code: 404, slug: "not_found", status: 404 } });
+    }
+    return json(res, 200, { ...account, status_reason: account.status_reason ?? null });
+  }
+
   if (path === "/connected_accounts") {
-    const items = filterComposioAccounts(url);
+    const items = filterComposioAccounts(url, apiKey);
     return json(res, 200, { items, next_cursor: null, total_items: items.length, current_page: 1, total_pages: 1 });
   }
   const toolMatch = path.match(/^\/tools\/execute\/([A-Z0-9_]+)$/);
@@ -317,7 +347,7 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/wordpress/")) return handleWordpress(req, res, path, body);
   if (path.startsWith("/composio/")) {
     const composioPath = path.replace(/^\/composio\/api\/v3(\.1)?/, "");
-    return handleComposio(req, res, composioPath, body, url);
+    return handleComposio(req, res, composioPath, body, url, req.headers["x-api-key"]);
   }
   if (path.startsWith("/webhook")) {
     state.webhook.push(body);

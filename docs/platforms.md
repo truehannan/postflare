@@ -40,9 +40,35 @@ Integrations → Composio panel, or a platform's configure page), clicking
 4. on return, the new account is auto-imported (Facebook/Reddit/Telegram ask
    for their required per-account setting: Page ID, subreddit, chat ID).
 
-Only a Composio project API key is needed. Account listings are filtered to
-`user_ids=postflare`, so connections made elsewhere in your Composio project
-are never picked up.
+Only a Composio project API key is needed, and the flow is fully serverless —
+Composio's own docs prescribe exactly this pattern ("redirect the user to the
+returned hosted link and wait for the resulting connected account to become
+active"): HTTP requests, browser redirects, and polling. No webhooks, no
+persistent server, no long-held connections.
+
+### Finishing the connection (deterministic)
+
+When the link is created, Composio returns the exact `connected_account_id`.
+Postflare remembers it (sessionStorage) and, after the hosted authorization
+returns, polls that **one account by id** (`GET /connected_accounts/{id}`)
+every 3 seconds until it is `ACTIVE` — then imports it automatically (or opens
+the config modal for Facebook Page ID / Reddit subreddit / Telegram chat ID).
+This survives refreshes: on any later visit the pending connection resumes.
+
+If the authorization doesn't complete, Composio's status and `status_reason`
+are surfaced honestly:
+
+| Status | Meaning |
+| --- | --- |
+| `ACTIVE` | Connected — imported automatically. |
+| `INITIALIZING` | Composio is processing — keep waiting. |
+| `INITIATED` | The OAuth was started but never completed on Composio's page — reconnect. |
+| `FAILED` / `EXPIRED` / `REVOKED` | Terminal — the reason is shown. |
+
+Account listings prefer the Postflare user (`user_ids=postflare`); if that
+filter matches nothing, Postflare falls back to listing all project accounts
+(flagged in the UI) so a connection is never silently hidden by a user-id
+mismatch.
 
 ## Adapter implementation status
 
