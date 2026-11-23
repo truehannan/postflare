@@ -21,7 +21,7 @@ import { Modal, ModalFooter } from "@/components/modal";
 import { PlatformIcon } from "@/lib/platform-icon";
 import { getPlatform, getPlatformLimit, supports } from "@shared/capabilities";
 import { AUTOMATION_TEMPLATES, type AutomationTemplate } from "@shared/automation";
-import type { Campaign, ConnectedAccount, MediaAsset } from "@shared/types";
+import type { Automation, Campaign, ConnectedAccount, MediaAsset } from "@shared/types";
 
 const EMOJIS = ["😀", "🔥", "🎉", "❤️", "👍", "🚀", "✨", "📣", "💡", "📈", "👏", "🙌", "😊", "📷", "🎯", "✅"];
 
@@ -55,6 +55,12 @@ export function ComposerPage() {
     queryFn: () => api.get<Campaign[]>("/api/campaigns"),
   });
   const [attachedTemplates, setAttachedTemplates] = useState<string[]>([]);
+  const [attachedAutomations, setAttachedAutomations] = useState<string[]>([]);
+
+  const { data: publishedAutomations } = useQuery({
+    queryKey: ["automations"],
+    queryFn: () => api.get<Automation[]>("/api/automations"),
+  });
 
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [variants, setVariants] = useState<Record<string, VariantState>>({ [DEFAULT_PLATFORM]: emptyVariant() });
@@ -193,6 +199,7 @@ export function ComposerPage() {
         publishNow: mode === "now",
         campaignId: campaignId || null,
         attachTemplateIds: attachedTemplates,
+        attachAutomationIds: attachedAutomations,
       }),
     onSuccess: async (post, { mode }) => {
       if (mode === "approval") {
@@ -439,7 +446,42 @@ export function ComposerPage() {
                     })}
                   </div>
                   <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">
-                    Attached automations are created and published bound to this post when you publish it.
+                    Attached templates are created and published bound to this post when you publish it.
+                  </Text>
+                </div>
+              )}
+
+              {/* Your published automations */}
+              {(publishedAutomations ?? []).filter((a) => a.status === "published").length > 0 && (
+                <div className="border-t border-kumo-line pt-3">
+                  <Text as="label" variant="secondary" DANGEROUS_className="mb-1.5 block text-[14px]">
+                    Your automations
+                  </Text>
+                  <div className="grid gap-1.5">
+                    {(publishedAutomations ?? [])
+                      .filter((a) => a.status === "published")
+                      .map((a) => {
+                        const attached = attachedAutomations.includes(a.id);
+                        return (
+                          <label key={a.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-kumo-tint">
+                            <input
+                              type="checkbox"
+                              checked={attached}
+                              onChange={() =>
+                                setAttachedAutomations((prev) =>
+                                  prev.includes(a.id) ? prev.filter((x) => x !== a.id) : [...prev, a.id],
+                                )
+                              }
+                              className="accent-[var(--color-kumo-brand)]"
+                            />
+                            <Text DANGEROUS_className="font-medium">{a.name}</Text>
+                            <Text variant="secondary">{a.triggerType.replace("trigger.", "").replace(/_/g, " ")}</Text>
+                          </label>
+                        );
+                      })}
+                  </div>
+                  <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">
+                    Selected automations are linked to this post.
                   </Text>
                 </div>
               )}

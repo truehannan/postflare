@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { Modal, ModalFooter } from "@/components/modal";
 import { StatusBadge } from "@/components/status-badge";
-import { AUTOMATION_TEMPLATES } from "@shared/automation";
+import { AUTOMATION_TEMPLATES, type SimpleAutomation } from "@shared/automation";
 import type { Automation } from "@shared/types";
 
 export function AutomationsPage() {
@@ -23,7 +23,11 @@ export function AutomationsPage() {
 
   const create = useMutation({
     mutationFn: (triggerType: string) =>
-      api.post<Automation>("/api/automations", { name, triggerType, definition: { nodes: [{ id: "n1", type: triggerType, position: { x: 0, y: 0 }, data: {} }], edges: [] } }),
+      api.post<Automation>("/api/automations", {
+        name,
+        triggerType,
+        simple: { triggerType, triggerConfig: {}, steps: [] },
+      }),
     onSuccess: (auto) => {
       setModalOpen(false);
       setName("");
@@ -31,6 +35,21 @@ export function AutomationsPage() {
       navigate(`/automations/builder/${auto.id}`);
     },
   });
+  const createSimple = useMutation({
+    mutationFn: (template: { triggerType: string; simple: SimpleAutomation }) =>
+      api.post<Automation>("/api/automations", {
+        name,
+        triggerType: template.triggerType,
+        simple: template.simple,
+      }),
+    onSuccess: (auto) => {
+      setModalOpen(false);
+      setName("");
+      queryClient.invalidateQueries({ queryKey: ["automations"] });
+      navigate(`/automations/builder/${auto.id}`);
+    },
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/automations/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
@@ -72,7 +91,7 @@ export function AutomationsPage() {
             <Surface key={t.id} className="rounded-lg p-4">
               <Text DANGEROUS_className="font-medium">{t.name}</Text>
               <Text variant="secondary" DANGEROUS_className="mt-0.5 block text-[14px]">{t.description}</Text>
-              <Button variant="secondary" size="sm" className="mt-3" onClick={() => { setName(t.name); create.mutate(t.triggerType); }}>
+              <Button variant="secondary" size="sm" className="mt-3" onClick={() => { setName(t.name); createSimple.mutate(t); }}>
                 Use template <ArrowRight size={13} />
               </Button>
             </Surface>
@@ -84,7 +103,7 @@ export function AutomationsPage() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         title="New automation"
-        description="Create a blank automation and open the visual builder."
+        description="Create a blank automation and open the editor."
         footer={<ModalFooter onClose={() => setModalOpen(false)} onSubmit={() => create.mutate("trigger.keyword")} submitLabel="Create" loading={create.isPending} />}
       >
         <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Welcome flow" />

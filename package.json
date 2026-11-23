@@ -26,7 +26,6 @@
     "@cloudflare/kumo": "^2.19.0",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.107.1",
-    "@xyflow/react": "^13.0.1",
     "echarts": "^6.1.0",
     "hono": "^4.13.19",
     "react": "^19.3.1",

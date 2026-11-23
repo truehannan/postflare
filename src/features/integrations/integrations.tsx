@@ -8,7 +8,11 @@ import { PlatformIcon } from "@/lib/platform-icon";
 import { ComposioPanel } from "@/features/integrations/composio-panel";
 import type { PlatformInfo } from "@shared/capabilities";
 
-type IntegrationRow = PlatformInfo & { configured: boolean; adapterImplemented: boolean };
+type IntegrationRow = PlatformInfo & {
+  configured: boolean;
+  adapterImplemented: boolean;
+  accountCounts: { direct: number; composio: number };
+};
 
 export function IntegrationsPage() {
   const { data, isLoading } = useQuery({
@@ -32,9 +36,13 @@ export function IntegrationsPage() {
                   <div className="flex min-w-0 items-center gap-3">
                     <PlatformIcon name={p.icon} size={20} color={p.color} />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <Text DANGEROUS_className="font-medium">{p.name}</Text>
-                        {p.configured && <Badge variant="success"><Check size={11} /> Configured</Badge>}
+                        {p.configured && <Badge variant="success"><Check size={11} /> Direct credentials</Badge>}
+                        {p.accountCounts.composio > 0 && (
+                          <Badge variant="info">{p.accountCounts.composio} via Composio</Badge>
+                        )}
+                        {p.accountCounts.direct > 0 && <Badge variant="secondary">{p.accountCounts.direct} direct</Badge>}
                         {!p.adapterImplemented && <Badge variant="outline">Adapter pending</Badge>}
                       </div>
                       <Text DANGEROUS_className="block truncate text-[14px]">{p.description}</Text>

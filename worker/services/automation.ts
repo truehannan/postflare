@@ -209,7 +209,9 @@ async function executeNode(
     case "logic.keyword": {
       const keywords = String(data.keywords ?? "").split(",").map((k) => k.trim().toLowerCase()).filter(Boolean);
       const text = (ctx.message ?? "").toLowerCase();
-      const matched = keywords.some((k) => text.includes(k));
+      const exact = String(data.match ?? "contains") === "exact";
+      const words = text.split(/[^a-z0-9@#]+/).filter(Boolean);
+      const matched = keywords.some((k) => (exact ? words.includes(k) : text.includes(k)));
       return { kind: "next", handle: matched ? "matched" : "not-matched" };
     }
 

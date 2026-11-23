@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { getPlatform } from "../../shared/capabilities";
-import { AUTOMATION_TEMPLATES } from "../../shared/automation";
+import { AUTOMATION_TEMPLATES, compileSimpleFlow } from "../../shared/automation";
 import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
 import { enqueuePost } from "./publishing";
@@ -25,6 +25,8 @@ export interface CreatePostInput {
   campaignId?: string | null;
   /** Quick-attach template ids; each is instantiated, published and bound to this post. */
   attachTemplateIds?: string[];
+  /** Existing published automation ids to attach to this post. */
+  attachAutomationIds?: string[];
 }
 
 export interface PostFilter {
@@ -114,16 +116,29 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
   for (const templateId of input.attachTemplateIds ?? []) {
     const template = AUTOMATION_TEMPLATES.find((t) => t.id === templateId);
     if (!template) throw badRequest(`Unknown automation template: ${templateId}`);
+    const definition = { ...compileSimpleFlow(template.simple), simple: template.simple };
     const automation = await createAutomation(env, workspaceId, actorId, {
       name: `${template.name} — ${postId.slice(-6)}`,
       triggerType: template.triggerType,
-      triggerConfig: { postId },
-      definition: template.definition,
+      triggerConfig: { ...template.simple.triggerConfig, postId },
+      definition,
     });
-    await publishAutomation(env, workspaceId, automation.id, template.definition, actorId);
+    await publishAutomation(env, workspaceId, automation.id, definition, actorId);
     await env.DB.prepare(
       "INSERT INTO post_automations (id, post_id, automation_id, created_at) VALUES (?, ?, ?, ?)",
     ).bind(randomId("pa_link"), postId, automation.id, new Date().toISOString()).run();
+  }
+
+  // Attach existing published automations to this post.
+  for (const automationId of input.attachAutomationIds ?? []) {
+    const row = await env.DB.prepare(
+      "SELECT id, status FROM automations WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+    ).bind(automationId, workspaceId).first<{ id: string; status: string }>();
+    if (!row) throw badRequest(`Unknown automation: ${automationId}`);
+    if (row.status !== "published") throw badRequest("Automations must be published before attaching");
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO post_automations (id, post_id, automation_id, created_at) VALUES (?, ?, ?, ?)",
+    ).bind(randomId("pa_link"), postId, automationId, new Date().toISOString()).run();
   }
 
   return (await getPost(env, workspaceId, postId))!;

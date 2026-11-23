@@ -1,7 +1,9 @@
 /**
  * Postflare — automation node & template catalog (shared).
- * The visual builder renders these node types; the Worker executes them.
+ * The simple editor renders these node types; the Worker executes them.
  */
+
+import type { FlowDefinition, FlowEdge, FlowNode } from "./types";
 
 export type AutomationNodeCategory = "trigger" | "message" | "logic" | "contact" | "action" | "ai" | "flow";
 
@@ -81,8 +83,196 @@ export function getNodeType(type: string): AutomationNodeType | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Simple (linear) automation model — the editor's source of truth.
+// An automation is one trigger plus an ordered list of steps; any step can
+// carry a keyword guard ("only run when the message contains …"). The model
+// compiles into the graph format the execution engine already runs.
+// ---------------------------------------------------------------------------
+
+export type GuardMatch = "contains" | "exact";
+
+export interface StepGuard {
+  /** Comma-separated keywords. */
+  keywords: string;
+  match: GuardMatch;
+}
+
+export interface SimpleStep {
+  /** UI-only key. */
+  id: string;
+  /** Node type (message.text, contact.add_tag, logic.delay, …). */
+  type: string;
+  config: Record<string, unknown>;
+  /** Optional keyword guard — the step only runs when the guard matches. */
+  guard?: StepGuard;
+}
+
+export interface SimpleAutomation {
+  triggerType: string;
+  triggerConfig: Record<string, unknown>;
+  steps: SimpleStep[];
+}
+
+let compileCounter = 0;
+
+/**
+ * Compile the linear model into a graph definition (nodes + edges) that the
+ * existing execution engine interprets unchanged. Guards become keyword
+ * nodes whose "not matched" edge skips the guarded step.
+ */
+export function compileSimpleFlow(simple: SimpleAutomation): FlowDefinition {
+  const nodes: FlowNode[] = [];
+  const edges: FlowEdge[] = [];
+  let y = 0;
+
+  const addNode = (type: string, data: Record<string, unknown>): string => {
+    compileCounter += 1;
+    const id = `n${compileCounter}`;
+    nodes.push({ id, type, position: { x: 40, y }, data });
+    y += 120;
+    return id;
+  };
+  const link = (source: string, target: string, handle?: string) => {
+    edges.push({ id: `e${edges.length + 1}`, source, target, sourceHandle: handle ?? null, targetHandle: null });
+  };
+
+  const triggerId = addNode(simple.triggerType, simple.triggerConfig ?? {});
+
+  // Walk the steps, wiring the main path as we go. A guard's "not matched"
+  // edge is deferred until we know the next step's entry node id.
+  interface PlannedGuard {
+    guardId: string;
+    stepIndex: number;
+  }
+  const stepEntryIds: string[] = [];
+  const plannedGuards: PlannedGuard[] = [];
+
+  let prev = triggerId;
+  simple.steps.forEach((step, i) => {
+    if (step.guard) {
+      const guardId = addNode("logic.keyword", { keywords: step.guard.keywords, match: step.guard.match });
+      link(prev, guardId);
+      const stepId = addNode(step.type, step.config ?? {});
+      link(guardId, stepId, "matched");
+      stepEntryIds.push(guardId);
+      plannedGuards.push({ guardId, stepIndex: i });
+      prev = stepId;
+    } else {
+      const stepId = addNode(step.type, step.config ?? {});
+      link(prev, stepId);
+      stepEntryIds.push(stepId);
+      prev = stepId;
+    }
+  });
+
+  const endId = addNode("flow.end", {});
+  link(prev, endId);
+
+  for (const g of plannedGuards) {
+    const nextIndex = g.stepIndex + 1;
+    const target = nextIndex < stepEntryIds.length ? stepEntryIds[nextIndex] : endId;
+    link(g.guardId, target, "not-matched");
+  }
+
+  return { nodes, edges };
+}
+
+export interface LinearizeResult {
+  simple: SimpleAutomation;
+  /** Honest notes when the graph couldn't be fully represented. */
+  warnings: string[];
+}
+
+/**
+ * Convert an existing graph definition into the linear model so legacy
+ * (canvas-built) automations open in the simple editor. Best effort: the
+ * recognized guard pattern (condition → matched → step, both paths rejoining)
+ * becomes a guarded step; anything else is followed along its first edge with
+ * a warning.
+ */
+export function tryLinearizeFlow(def: FlowDefinition): LinearizeResult {
+  const warnings: string[] = [];
+  const nodes = new Map(def.nodes.map((n) => [n.id, n] as const));
+  const start = def.nodes.find((n) => n.type.startsWith("trigger."));
+  if (!start) {
+    return {
+      simple: { triggerType: "trigger.keyword", triggerConfig: { keywords: "hi" }, steps: [] },
+      warnings: ["No trigger node was found in the saved flow."],
+    };
+  }
+
+  const outgoing = new Map<string, FlowEdge[]>();
+  for (const e of def.edges) {
+    const list = outgoing.get(e.source) ?? [];
+    list.push(e);
+    outgoing.set(e.source, list);
+  }
+  const firstOut = (id: string): FlowEdge | undefined => (outgoing.get(id) ?? [])[0];
+
+  const steps: SimpleStep[] = [];
+  let current: string | undefined = start.id;
+  let stepKey = 0;
+
+  while (current) {
+    const node = nodes.get(current);
+    if (!node) break;
+    if (node.type === "flow.end" || node.type === "flow.stop") break;
+    if (node.type.startsWith("trigger.")) {
+      current = firstOut(node.id)?.target;
+      continue;
+    }
+
+    const edges = outgoing.get(node.id) ?? [];
+    if (node.type === "logic.keyword" || node.type === "logic.condition") {
+      const matched = edges.find(
+        (e) => (e.sourceHandle ?? "").toLowerCase() === "matched" || (e.sourceHandle ?? "").toLowerCase() === "true",
+      );
+      const other = edges.find((e) => e !== matched);
+      const stepNode = matched ? nodes.get(matched.target) : undefined;
+      const stepAfter = stepNode ? firstOut(stepNode.id)?.target : undefined;
+      if (edges.length === 2 && stepNode && other && stepAfter === other.target && !stepNode.type.startsWith("logic.")) {
+        // Recognized guard → step pattern.
+        stepKey += 1;
+        steps.push({
+          id: `s${stepKey}`,
+          type: stepNode.type,
+          config: (stepNode.data ?? {}) as Record<string, unknown>,
+          guard: {
+            keywords: String((node.data as Record<string, unknown>)?.keywords ?? ""),
+            match: (((node.data as Record<string, unknown>)?.match as GuardMatch) ?? "contains"),
+          },
+        });
+        current = stepAfter;
+        continue;
+      }
+      warnings.push("A branch step could not be represented as a simple condition and was dropped.");
+      current = matched?.target ?? edges[0]?.target;
+      continue;
+    }
+
+    stepKey += 1;
+    steps.push({ id: `s${stepKey}`, type: node.type, config: (node.data ?? {}) as Record<string, unknown> });
+    if (edges.length > 1) {
+      warnings.push(`A step had multiple outgoing paths; only the first was kept.`);
+    }
+    current = edges[0]?.target;
+  }
+
+  return {
+    simple: {
+      triggerType: start.type,
+      triggerConfig: (start.data ?? {}) as Record<string, unknown>,
+      steps,
+    },
+    warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Templates
 // ---------------------------------------------------------------------------
+// Templates are defined in the simple (linear) format and compiled into the
+// graph format on save/attach — one source of truth.
 
 export interface AutomationTemplate {
   id: string;
@@ -91,7 +281,7 @@ export interface AutomationTemplate {
   triggerType: string;
   /** Postflare platform ids this template is relevant to; empty = generic. */
   platforms: string[];
-  definition: { nodes: { id: string; type: string; position: { x: number; y: number }; data: Record<string, unknown> }[]; edges: { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }[] };
+  simple: SimpleAutomation;
 }
 
 const commentToDm: AutomationTemplate = {
@@ -100,21 +290,21 @@ const commentToDm: AutomationTemplate = {
   description: "Reply to commenters who use a specific keyword, tag them, and start a follow-up.",
   triggerType: "trigger.comment",
   platforms: ["instagram"],
-  definition: {
-    nodes: [
-      { id: "n1", type: "trigger.comment", position: { x: 0, y: 0 }, data: {} },
-      { id: "n2", type: "logic.keyword", position: { x: 220, y: 0 }, data: { keywords: "PRICE, PRICING" } },
-      { id: "n3", type: "contact.add_tag", position: { x: 440, y: -60 }, data: { tag: "pricing-interest" } },
-      { id: "n4", type: "message.text", position: { x: 660, y: -60 }, data: { text: "Thanks for your interest! Here's our pricing…" } },
-      { id: "n5", type: "flow.end", position: { x: 880, y: -60 }, data: {} },
-      { id: "n6", type: "flow.end", position: { x: 440, y: 80 }, data: {} },
-    ],
-    edges: [
-      { id: "e1", source: "n1", target: "n2" },
-      { id: "e2", source: "n2", target: "n3", sourceHandle: "matched", targetHandle: "in" },
-      { id: "e3", source: "n3", target: "n4" },
-      { id: "e4", source: "n4", target: "n5" },
-      { id: "e5", source: "n2", target: "n6", sourceHandle: "not-matched", targetHandle: "in" },
+  simple: {
+    triggerType: "trigger.comment",
+    triggerConfig: { accountId: "", postId: "" },
+    steps: [
+      {
+        id: "s1",
+        type: "contact.add_tag",
+        config: { tag: "pricing-interest" },
+        guard: { keywords: "PRICE, PRICING", match: "contains" },
+      },
+      {
+        id: "s2",
+        type: "message.text",
+        config: { text: "Thanks for your interest! Here's our pricing…" },
+      },
     ],
   },
 };
@@ -125,17 +315,12 @@ const welcomeBot: AutomationTemplate = {
   description: "Send a welcome message and offer quick replies to new Telegram chats.",
   triggerType: "trigger.telegram_message",
   platforms: ["telegram"],
-  definition: {
-    nodes: [
-      { id: "n1", type: "trigger.telegram_message", position: { x: 0, y: 0 }, data: {} },
-      { id: "n2", type: "message.text", position: { x: 220, y: 0 }, data: { text: "👋 Welcome! How can we help today?" } },
-      { id: "n3", type: "message.quick_replies", position: { x: 440, y: 0 }, data: { text: "Choose an option:", options: "Pricing\nSupport\nTalk to a human" } },
-      { id: "n4", type: "flow.end", position: { x: 660, y: 0 }, data: {} },
-    ],
-    edges: [
-      { id: "e1", source: "n1", target: "n2" },
-      { id: "e2", source: "n2", target: "n3" },
-      { id: "e3", source: "n3", target: "n4" },
+  simple: {
+    triggerType: "trigger.telegram_message",
+    triggerConfig: {},
+    steps: [
+      { id: "s1", type: "message.text", config: { text: "👋 Welcome! How can we help today?" } },
+      { id: "s2", type: "message.quick_replies", config: { text: "Choose an option:", options: "Pricing\nSupport\nTalk to a human" } },
     ],
   },
 };
@@ -146,21 +331,17 @@ const leadQualification: AutomationTemplate = {
   description: "Ask a qualification question and tag the contact based on their answer.",
   triggerType: "trigger.whatsapp_message",
   platforms: ["whatsapp"],
-  definition: {
-    nodes: [
-      { id: "n1", type: "trigger.whatsapp_message", position: { x: 0, y: 0 }, data: {} },
-      { id: "n2", type: "message.text", position: { x: 220, y: 0 }, data: { text: "Are you interested in a demo? Reply YES or NO." } },
-      { id: "n3", type: "logic.keyword", position: { x: 440, y: 0 }, data: { keywords: "yes" } },
-      { id: "n4", type: "contact.add_tag", position: { x: 660, y: -60 }, data: { tag: "hot-lead" } },
-      { id: "n5", type: "flow.end", position: { x: 880, y: -60 }, data: {} },
-      { id: "n6", type: "flow.end", position: { x: 660, y: 80 }, data: {} },
-    ],
-    edges: [
-      { id: "e1", source: "n1", target: "n2" },
-      { id: "e2", source: "n2", target: "n3" },
-      { id: "e3", source: "n3", target: "n4", sourceHandle: "matched", targetHandle: "in" },
-      { id: "e4", source: "n4", target: "n5" },
-      { id: "e5", source: "n3", target: "n6", sourceHandle: "not-matched", targetHandle: "in" },
+  simple: {
+    triggerType: "trigger.whatsapp_message",
+    triggerConfig: {},
+    steps: [
+      { id: "s1", type: "message.text", config: { text: "Are you interested in a demo? Reply YES or NO." } },
+      {
+        id: "s2",
+        type: "contact.add_tag",
+        config: { tag: "hot-lead" },
+        guard: { keywords: "yes", match: "contains" },
+      },
     ],
   },
 };
@@ -171,19 +352,16 @@ const faqAutomation: AutomationTemplate = {
   description: "Answer common questions with a keyword-based router.",
   triggerType: "trigger.keyword",
   platforms: [],
-  definition: {
-    nodes: [
-      { id: "n1", type: "trigger.keyword", position: { x: 0, y: 0 }, data: { keywords: "hours, price, refund" } },
-      { id: "n2", type: "logic.keyword", position: { x: 220, y: 0 }, data: { keywords: "hours" } },
-      { id: "n3", type: "message.text", position: { x: 440, y: -60 }, data: { text: "We're open 9am–6pm, Monday to Friday." } },
-      { id: "n4", type: "flow.end", position: { x: 660, y: -60 }, data: {} },
-      { id: "n5", type: "flow.end", position: { x: 440, y: 80 }, data: {} },
-    ],
-    edges: [
-      { id: "e1", source: "n1", target: "n2" },
-      { id: "e2", source: "n2", target: "n3", sourceHandle: "matched", targetHandle: "in" },
-      { id: "e3", source: "n3", target: "n4" },
-      { id: "e4", source: "n2", target: "n5", sourceHandle: "not-matched", targetHandle: "in" },
+  simple: {
+    triggerType: "trigger.keyword",
+    triggerConfig: { keywords: "hours, price, refund" },
+    steps: [
+      {
+        id: "s1",
+        type: "message.text",
+        config: { text: "We're open 9am–6pm, Monday to Friday." },
+        guard: { keywords: "hours", match: "contains" },
+      },
     ],
   },
 };

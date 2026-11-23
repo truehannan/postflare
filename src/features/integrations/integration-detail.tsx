@@ -89,7 +89,7 @@ export function IntegrationDetailPage() {
             <div className="mb-5 rounded-lg bg-kumo-recessed p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <Text DANGEROUS_className="font-medium">Connect via Composio</Text>
+                  <Text DANGEROUS_className="font-medium">Option B — Connect via Composio</Text>
                   <Text variant="secondary" DANGEROUS_className="block max-w-md">
                     Authorize once on Composio's hosted gateway — no developer credentials needed. The connection is created under your Postflare Composio user and appears in Settings → Integrations.
                   </Text>

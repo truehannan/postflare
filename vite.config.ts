@@ -19,7 +19,6 @@ export default defineConfig({
         manualChunks: {
           "react-vendor": ["react", "react-dom", "react-router-dom", "zustand", "@tanstack/react-query"],
           kumo: ["@cloudflare/kumo", "@phosphor-icons/react"],
-          flow: ["@xyflow/react"],
         },
       },
     },

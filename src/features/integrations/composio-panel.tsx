@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Input, Surface, Text } from "@cloudflare/kumo";
 import { DownloadSimple, Key, Lightning, PlugsConnected } from "@phosphor-icons/react";
@@ -31,15 +31,18 @@ export function ComposioPanel() {
   const [importName, setImportName] = useState("");
   const [importConfig, setImportConfig] = useState<Record<string, string>>({});
   const [returnProvider, setReturnProvider] = useState<string | null>(null);
+  const returnDeadline = useRef(0);
 
   const { data: status } = useQuery({
     queryKey: ["composio-status"],
     queryFn: () => api.get<ComposioStatus>("/api/composio"),
   });
-  const { data: remoteAccounts, refetch: refetchRemote } = useQuery({
+  const { data: remoteAccounts } = useQuery({
     queryKey: ["composio-accounts"],
     queryFn: () => api.get<RemoteAccount[]>("/api/composio/connected-accounts"),
     enabled: !!status?.configured,
+    // While waiting for a gateway return, poll until the new account is ACTIVE.
+    refetchInterval: returnProvider ? 3000 : false,
   });
 
   const saveKey = useMutation({
@@ -55,13 +58,17 @@ export function ComposioPanel() {
   });
 
   // Detect the return from Composio's hosted authorization and pick the flow
-  // back up (auto-import, or open the config modal for FB/Reddit/Telegram).
+  // back up. Composio may take a few seconds to flip the account to ACTIVE, so
+  // poll (see refetchInterval) until it appears — then auto-import or open the
+  // config modal for platforms that need one (FB Page, subreddit, chat ID).
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("composio") !== "connected") return;
     const provider = params.get("provider");
     window.history.replaceState({}, "", window.location.pathname);
-    setReturnProvider(provider);
+    returnDeadline.current = Date.now() + 45_000;
+    setReturnProvider(provider ?? "");
+    setMessage("Composio authorization completed — finishing the connection…");
   }, []);
 
   const connect = useMutation({
@@ -86,27 +93,32 @@ export function ComposioPanel() {
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Import failed"),
   });
 
-  // Once accounts are loaded after a gateway return, finish the import.
+  // Once the new account becomes ACTIVE after a gateway return, finish the
+  // import. Polls until it shows up or the deadline passes.
   useEffect(() => {
-    if (!returnProvider || !remoteAccounts) return;
-    setReturnProvider(null);
-    const pending = remoteAccounts.filter(
+    if (returnProvider === null || !remoteAccounts) return;
+    const target = remoteAccounts.find(
       (a) => a.providerId === returnProvider && a.status === "ACTIVE" && !a.imported,
     );
-    if (pending.length === 0) {
-      setMessage("Composio authorization completed — no new active account found yet. It may take a moment to become active.");
+    if (target) {
+      setReturnProvider(null);
+      const needsConfig = (status?.supported.find((s) => s.platformId === target.providerId)?.accountConfigFields ?? []).some(
+        (f) => f.required,
+      );
+      if (needsConfig) {
+        setImportTarget(target);
+        setImportConfig({});
+        setMessage("Composio authorization completed — finish importing the account.");
+      } else {
+        autoImport.mutate(target);
+      }
       return;
     }
-    const target = pending[0];
-    const needsConfig = (status?.supported.find((s) => s.platformId === target.providerId)?.accountConfigFields ?? []).some(
-      (f) => f.required,
-    );
-    if (needsConfig) {
-      setImportTarget(target);
-      setImportConfig({});
-      setMessage("Composio authorization completed — finish importing the account.");
-    } else {
-      autoImport.mutate(target);
+    if (Date.now() > returnDeadline.current) {
+      setReturnProvider(null);
+      setMessage(
+        "Composio authorization completed, but the account is not active yet. It will appear in the list below as soon as Composio finishes — then press Import.",
+      );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [returnProvider, remoteAccounts]);
@@ -126,12 +138,10 @@ export function ComposioPanel() {
       setError(null);
       queryClient.invalidateQueries({ queryKey: ["composio-accounts"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      refetchRemote();
     },
     onError: (e) => setError(e instanceof ApiClientError ? e.message : "Import failed"),
   });
 
-  const importable = (remoteAccounts ?? []).filter((a) => a.providerId && a.status === "ACTIVE");
   const supportFor = (a: RemoteAccount) => status?.supported.find((s) => s.platformId === a.providerId);
 
   return (
@@ -194,25 +204,34 @@ export function ComposioPanel() {
 
       {status?.configured && (
         <div className="mt-5 border-t border-kumo-line pt-4">
-          <Text DANGEROUS_className="mb-2">Composio connected accounts</Text>
-          {importable.length === 0 ? (
+          <div className="mb-2 flex items-center justify-between">
+            <Text DANGEROUS_className="">Composio connected accounts</Text>
+            {returnProvider !== null && <Badge variant="info">Waiting for the account to become active…</Badge>}
+          </div>
+          {(remoteAccounts ?? []).filter((a) => a.providerId).length === 0 ? (
             <Text variant="secondary">
-              No active Composio accounts yet — use the buttons above to connect a platform.
+              No Composio accounts yet — use the buttons above to connect a platform.
             </Text>
           ) : (
             <div className="divide-y divide-kumo-line">
-              {importable.map((a) => {
+              {(remoteAccounts ?? []).filter((a) => a.providerId).map((a) => {
                 const platform = getPlatform(a.providerId!);
+                const isActive = a.status === "ACTIVE";
                 return (
                   <div key={a.id} className="flex items-center justify-between gap-3 py-2">
                     <div className="flex min-w-0 items-center gap-2">
                       <PlatformIcon name={platform?.icon ?? "Circle"} size={16} color={platform?.color} />
                       <Text DANGEROUS_className="truncate">{a.name}</Text>
                       <Badge variant="outline">{platform?.name ?? a.toolkit}</Badge>
+                      {a.imported ? (
+                        <Badge variant="success">Connected</Badge>
+                      ) : isActive ? (
+                        <Badge variant="warning">Not imported</Badge>
+                      ) : (
+                        <Badge variant="info">{a.status.toLowerCase()}</Badge>
+                      )}
                     </div>
-                    {a.imported ? (
-                      <Badge variant="success">Imported</Badge>
-                    ) : (
+                    {!a.imported && isActive && (
                       <Button variant="secondary" size="sm" onClick={() => { setImportTarget(a); setImportConfig({}); }}>
                         <DownloadSimple size={14} /> Import
                       </Button>

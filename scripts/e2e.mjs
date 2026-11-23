@@ -551,6 +551,45 @@ async function runSuite() {
     assert(publish && publish.args.creation_id === "17890000000000001", "publish tool called with the container id");
   });
 
+  // ---- Simple (linear) automation format ----------------------------------------
+  let simpleAutoId = "";
+  await test("create + publish a simple-format automation (compiled to the graph)", async () => {
+    const simple = {
+      triggerType: "trigger.keyword",
+      triggerConfig: { keywords: "hi" },
+      steps: [
+        { id: "s1", type: "contact.add_tag", config: { tag: "simple-run" }, guard: { keywords: "hi", match: "contains" } },
+        { id: "s2", type: "message.text", config: { text: "Hello from simple" } },
+      ],
+    };
+    const created = ok(await api("POST", "/api/automations", { body: { name: "Simple flow", triggerType: simple.triggerType, simple }, workspaceId: ws }));
+    simpleAutoId = created.data.data.id;
+    ok(await api("POST", `/api/automations/${simpleAutoId}/publish`, { body: { simple }, workspaceId: ws }));
+    const latest = ok(await api("GET", `/api/automations/${simpleAutoId}/latest`, { workspaceId: ws }));
+    const def = latest.data.data.definition;
+    assert(def.simple && def.simple.steps.length === 2, "simple model stored alongside the compiled graph");
+    assert(def.nodes.some((n) => n.type === "logic.keyword"), "guard compiled into a keyword node");
+    const guardEdges = def.edges.filter((e) => e.sourceHandle === "not-matched");
+    assert(guardEdges.length === 1, "guard has a not-matched skip edge");
+    const run = ok(await api("POST", `/api/automations/${simpleAutoId}/test`, { body: { message: "hi there", variables: { message: "hi there" } }, workspaceId: ws }));
+    assert(run.data.data.status === "completed", "compiled flow executes end-to-end");
+  });
+  await test("existing automations can be attached from the composer", async () => {
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "bluesky", text: "Post with attached automation" }],
+        accountIds: [],
+        attachAutomationIds: [simpleAutoId],
+      },
+    }));
+    const postId = r.data.data.id;
+    const links = JSON.parse(runSync("npx", ["wrangler", "d1", "execute", "postflare-db", "--local", "--json", "--command",
+      `SELECT automation_id FROM post_automations WHERE post_id = '${postId}'`]));
+    const ids = links[0].results.map((row) => row.automation_id);
+    assert(ids.includes(simpleAutoId), "published automation linked to the post");
+  });
+
   // ---- Composio auth gateway (Postflare user, hosted authorization) --------------
   await test("auth gateway initiates a link under the postflare user", async () => {
     const conn = ok(await api("POST", "/api/composio/connect", { body: { providerId: "x" }, workspaceId: ws }));

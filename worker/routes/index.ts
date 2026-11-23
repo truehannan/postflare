@@ -20,8 +20,9 @@ import * as analytics from "../services/analytics";
 import * as campaigns from "../services/campaigns";
 import * as approvals from "../services/approvals";
 import * as team from "../services/team";
+import * as accounts_ from "../services/accounts";
 import { getPlatform, PLATFORMS } from "../../shared/capabilities";
-import { AUTOMATION_NODE_TYPES, AUTOMATION_TEMPLATES } from "../../shared/automation";
+import { AUTOMATION_NODE_TYPES, AUTOMATION_TEMPLATES, compileSimpleFlow, type SimpleAutomation } from "../../shared/automation";
 import { COMPOSIO_SUPPORTED } from "../../shared/composio";
 import * as composio from "../services/composio";
 import { hasAdapter } from "../adapters/registry";
@@ -91,20 +92,41 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
   const integrationRoutes = new Hono<AppCtx>();
   integrationRoutes.use("*", requireAuth, requireWorkspace);
   integrationRoutes.get("/", async (c) => {
-    const creds = await credentials.listCredentialRecords(c.env, c.get("workspace").workspaceId);
+    const workspaceId = c.get("workspace").workspaceId;
+    const creds = await credentials.listCredentialRecords(c.env, workspaceId);
     const configured = new Set(creds.map((r) => r.providerId));
+    const counts = await c.env.DB.prepare(
+      "SELECT provider_id, connection_mode, COUNT(*) AS n FROM connected_accounts WHERE workspace_id = ? GROUP BY provider_id, connection_mode",
+    ).bind(workspaceId).all<{ provider_id: string; connection_mode: string; n: number }>();
+    const byProvider = new Map<string, { direct: number; composio: number }>();
+    for (const row of counts.results ?? []) {
+      const entry = byProvider.get(row.provider_id) ?? { direct: 0, composio: 0 };
+      if (row.connection_mode === "composio") entry.composio = row.n;
+      else entry.direct = row.n;
+      byProvider.set(row.provider_id, entry);
+    }
     const list = PLATFORMS.map((p) => ({
       ...p,
       configured: configured.has(p.id),
       adapterImplemented: hasAdapter(p.id),
+      accountCounts: byProvider.get(p.id) ?? { direct: 0, composio: 0 },
     }));
     return jsonOk(c, list);
   });
   integrationRoutes.get("/:providerId", async (c) => {
     const platform = getPlatform(c.req.param("providerId"));
     if (!platform) throw badRequest("Unknown provider");
-    const creds = await credentials.getCredentialRecord(c.env, c.get("workspace").workspaceId, platform.id);
-    return jsonOk(c, { ...platform, configured: !!creds, masked: creds?.masked ?? {}, fieldKeys: creds?.fieldKeys ?? [], adapterImplemented: hasAdapter(platform.id) });
+    const workspaceId = c.get("workspace").workspaceId;
+    const creds = await credentials.getCredentialRecord(c.env, workspaceId, platform.id);
+    const accounts = await accounts_.listAccounts(c.env, workspaceId);
+    return jsonOk(c, {
+      ...platform,
+      configured: !!creds,
+      masked: creds?.masked ?? {},
+      fieldKeys: creds?.fieldKeys ?? [],
+      adapterImplemented: hasAdapter(platform.id),
+      accounts: accounts.filter((a) => a.providerId === platform.id),
+    });
   });
   app.route("/api/integrations", integrationRoutes);
 
@@ -294,6 +316,7 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
       publishNow: z.boolean().default(false),
       campaignId: z.string().nullish(),
       attachTemplateIds: z.array(z.string()).default([]),
+      attachAutomationIds: z.array(z.string()).default([]),
     }));
     const post = await posts.createPost(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
     return jsonOk(c, post, 201);
@@ -490,12 +513,20 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
       triggerType: z.string(),
       triggerConfig: z.record(z.string(), z.unknown()).optional(),
       definition: z.any().optional(),
+      simple: z.any().optional(),
     }));
-    return jsonOk(c, await automations.createAutomation(c.env, c.get("workspace").workspaceId, c.get("user").userId, input as automations.CreateAutomationInput), 201);
+    const input2 = input as automations.CreateAutomationInput & { simple?: SimpleAutomation };
+    const definition = input2.simple
+      ? { ...compileSimpleFlow(input2.simple), simple: input2.simple }
+      : input.definition;
+    return jsonOk(c, await automations.createAutomation(c.env, c.get("workspace").workspaceId, c.get("user").userId, { ...input2, definition }), 201);
   });
   automationRoutes.post("/:id/publish", async (c) => {
-    const input = await parseJson(c, z.object({ definition: z.any() }));
-    return jsonOk(c, await automations.publishAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"), input.definition, c.get("user").userId));
+    const input = await parseJson(c, z.object({ definition: z.any().optional(), simple: z.any().optional() }));
+    const definition = input.simple
+      ? { ...compileSimpleFlow(input.simple as SimpleAutomation), simple: input.simple }
+      : input.definition;
+    return jsonOk(c, await automations.publishAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"), definition, c.get("user").userId));
   });
   automationRoutes.post("/:id/test", async (c) => {
     const input = await parseJson(c, z.object({ message: z.string().optional(), contactId: z.string().nullish(), variables: z.record(z.string(), z.string()).optional() }));

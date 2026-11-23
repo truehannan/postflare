@@ -1,14 +1,22 @@
-# Automation engine
-
-Postflare includes a native ManyChat-style visual automation system.
-
 ## Editor
 
-- Built with **React Flow** (`@xyflow/react`) at `/automations/builder/:id`.
-- Node palette, drag-and-drop canvas, minimap, zoom/pan, per-node config panel.
-- Flows are stored as **versioned, validated JSON** (`automation_versions`), not
-  as the canvas layout. Publishing validates node id uniqueness, edge integrity,
-  and the presence of a trigger/start node.
+Automations are edited with a simple, static form interface — no node canvas.
+An automation is **one trigger plus an ordered list of steps**:
+
+- **When this happens** — the trigger (type + config from the node catalog).
+- **Then do this** — steps run top to bottom. Each step renders its config as
+  form fields, can be reordered or removed, and can carry a keyword guard
+  ("only run when the message contains …", contains or exact word).
+- Wait steps pause the flow and resume via the cron sweep.
+
+The linear model (`SimpleAutomation` in `shared/automation.ts`) is the editor's
+source of truth. It **compiles into the graph format** the execution engine
+already runs (`compileSimpleFlow`), so both formats share one interpreter:
+guards become keyword nodes whose "not matched" edge skips the guarded step.
+Legacy canvas-built automations open in the editor via a best-effort
+`tryLinearizeFlow` conversion (with an honest warning when branches were
+dropped). Flows are stored as versioned JSON in `automation_versions` — both
+the compiled graph and the simple model — so drafts never execute.
 
 ## Node catalog
 
