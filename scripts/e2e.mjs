@@ -477,10 +477,14 @@ async function runSuite() {
     const { items, scope } = list.data.data;
     assert(scope === "user", "list is scoped to the postflare user");
     assert(items.length === 8, `expected 8 mock composio accounts, got ${items.length}`);
+    // Real Composio returns lowercase toolkit slugs; the mapping must be
+    // case-insensitive (regression: 'instagram, not INSTAGRAM' import error).
+    const twitter = items.find((a) => a.toolkit === "twitter");
+    assert(twitter && twitter.providerId === "x", "lowercase toolkit slug maps to the platform");
+    const instagram = items.find((a) => a.toolkit === "instagram");
+    assert(instagram && instagram.providerId === "instagram", "lowercase instagram slug maps (regression)");
     const github = items.find((a) => a.toolkit === "GITHUB");
-    assert(github && github.providerId === null, "unsupported toolkits are surfaced unmapped");
-    const twitter = items.find((a) => a.toolkit === "TWITTER");
-    assert(twitter && twitter.providerId === "x", "toolkit mapped to postflare platform");
+    assert(github && github.providerId === null, "mixed-case unsupported toolkit stays unmapped");
   });
   await test("import Composio accounts (x, telegram with chatId, instagram)", async () => {
     const imports = [

@@ -92,6 +92,15 @@ interface ComposioAccountItem {
   toolkit: { slug: string };
 }
 
+/**
+ * Toolkit-slug comparison. Composio's docs use SCREAMING_CASE slugs
+ * (INSTAGRAM) while live connected-account responses have been observed
+ * lowercase (instagram) — every comparison must be case-insensitive.
+ */
+function sameToolkit(a: string | null | undefined, b: string): boolean {
+  return (a ?? "").toLowerCase() === b.toLowerCase();
+}
+
 interface AuthConfigItem {
   id: string;
   status?: string;
@@ -214,7 +223,7 @@ export async function listComposioAccounts(
 
   const mapItems = (items: ComposioAccountItem[]): ComposioRemoteAccount[] =>
     items.map((item) => {
-      const support = COMPOSIO_SUPPORTED.find((s) => s.toolkit === item.toolkit?.slug);
+      const support = COMPOSIO_SUPPORTED.find((s) => sameToolkit(item.toolkit?.slug, s.toolkit));
       return {
         id: item.id,
         toolkit: item.toolkit?.slug ?? "",
@@ -307,7 +316,7 @@ async function toStatus(
   workspaceId: string,
   item: ComposioAccountItem,
 ): Promise<ComposioConnectionStatus> {
-  const support = COMPOSIO_SUPPORTED.find((s) => s.toolkit === item.toolkit?.slug);
+  const support = COMPOSIO_SUPPORTED.find((s) => sameToolkit(item.toolkit?.slug, s.toolkit));
   const importedRow = await env.DB.prepare(
     "SELECT id FROM connected_accounts WHERE workspace_id = ? AND connection_mode = 'composio' AND external_id = ?",
   ).bind(workspaceId, item.id).first<{ id: string }>();
@@ -349,8 +358,8 @@ export async function importComposioAccount(
   );
   const item = verify.json?.items?.[0];
   if (verify.status !== 200 || !item) throw notFound("Composio account not found");
-  if (item.toolkit?.slug !== support.toolkit) {
-    throw badRequest(`This Composio account is for ${item.toolkit?.slug}, not ${support.toolkit}`);
+  if (!sameToolkit(item.toolkit?.slug, support.toolkit)) {
+    throw badRequest(`This Composio account is for ${item.toolkit?.slug ?? "unknown"}, not ${support.toolkit}`);
   }
   if (item.status !== "ACTIVE") {
     throw badRequest(`Composio account status is ${item.status}; it must be ACTIVE to import`);

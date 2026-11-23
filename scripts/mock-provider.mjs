@@ -108,18 +108,22 @@ function handleWordpress(req, res, path, body) {
   return json(res, 404, { error: `unknown wordpress route ${req.method} ${path}` });
 }
 
+// NOTE: like the real Composio API, connected-account payloads carry
+// LOWERCASE toolkit slugs (instagram) even though the docs list them as
+// SCREAMING_CASE — Postflare must match case-insensitively. GITHUB is kept
+// uppercase to prove mixed-case robustness.
 const COMPOSIO_ACCOUNTS = [
-  { id: "ca_twitter_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Mock X", word_id: null, user_id: "postflare" },
-  { id: "ca_linkedin_1", toolkit: { slug: "LINKEDIN" }, status: "ACTIVE", alias: "Mock LinkedIn", word_id: null, user_id: "postflare" },
-  { id: "ca_instagram_1", toolkit: { slug: "INSTAGRAM" }, status: "ACTIVE", alias: "Mock IG", word_id: null, user_id: "postflare" },
-  { id: "ca_telegram_1", toolkit: { slug: "TELEGRAM" }, status: "ACTIVE", alias: "Mock Tg", word_id: null, user_id: "postflare" },
-  { id: "ca_facebook_1", toolkit: { slug: "FACEBOOK" }, status: "ACTIVE", alias: "Mock FB Page", word_id: null, user_id: "postflare" },
-  { id: "ca_threads_1", toolkit: { slug: "THREADS" }, status: "ACTIVE", alias: "Mock Threads", word_id: null, user_id: "postflare" },
-  { id: "ca_reddit_1", toolkit: { slug: "REDDIT" }, status: "ACTIVE", alias: "Mock Reddit", word_id: null, user_id: "postflare" },
-  { id: "ca_github_1", toolkit: { slug: "GITHUB" }, status: "ACTIVE", alias: "Mock GitHub", word_id: null, user_id: "postflare" }, // unsupported in Postflare
+  { id: "ca_twitter_1", toolkit: { slug: "twitter" }, status: "ACTIVE", alias: "Mock X", word_id: null, user_id: "postflare" },
+  { id: "ca_linkedin_1", toolkit: { slug: "linkedin" }, status: "ACTIVE", alias: "Mock LinkedIn", word_id: null, user_id: "postflare" },
+  { id: "ca_instagram_1", toolkit: { slug: "instagram" }, status: "ACTIVE", alias: "Mock IG", word_id: null, user_id: "postflare" },
+  { id: "ca_telegram_1", toolkit: { slug: "telegram" }, status: "ACTIVE", alias: "Mock Tg", word_id: null, user_id: "postflare" },
+  { id: "ca_facebook_1", toolkit: { slug: "facebook" }, status: "ACTIVE", alias: "Mock FB Page", word_id: null, user_id: "postflare" },
+  { id: "ca_threads_1", toolkit: { slug: "threads" }, status: "ACTIVE", alias: "Mock Threads", word_id: null, user_id: "postflare" },
+  { id: "ca_reddit_1", toolkit: { slug: "reddit" }, status: "ACTIVE", alias: "Mock Reddit", word_id: null, user_id: "postflare" },
+  { id: "ca_github_1", toolkit: { slug: "GITHUB" }, status: "ACTIVE", alias: "Mock GitHub", word_id: null, user_id: "postflare" }, // unsupported in Postflare, mixed case on purpose
   // A connection created elsewhere (different user) — must NOT be listed
   // when Postflare filters by its own user, "postflare".
-  { id: "ca_dash_1", toolkit: { slug: "TWITTER" }, status: "ACTIVE", alias: "Dashboard X", word_id: null, user_id: "someone_else" },
+  { id: "ca_dash_1", toolkit: { slug: "twitter" }, status: "ACTIVE", alias: "Dashboard X", word_id: null, user_id: "someone_else" },
 ];
 
 // Auth configs per toolkit (id → toolkit), as Composio's managed defaults.
@@ -236,7 +240,7 @@ function handleComposio(req, res, path, body, url, apiKey) {
     const id = `ca_new_${dynamicCounter}`;
     dynamicAccounts.push({
       id,
-      toolkit: { slug: toolkitSlug },
+      toolkit: { slug: toolkitSlug.toLowerCase() },
       status: "INITIALIZING",
       alias: `New ${toolkitSlug} ${dynamicCounter}`,
       word_id: null,
