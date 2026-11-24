@@ -8,6 +8,7 @@ export function Modal({
   description,
   children,
   footer,
+  size = "lg",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -15,10 +16,11 @@ export function Modal({
   description?: string;
   children: ReactNode;
   footer?: ReactNode;
+  size?: "lg" | "xl";
 }) {
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
-      <Dialog size="lg">
+      <Dialog size={size}>
         <div className="grid gap-2 p-5 pb-0">
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}

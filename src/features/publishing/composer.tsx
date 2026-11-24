@@ -9,6 +9,7 @@ import {
   Hash,
   ImageSquare,
   PaperPlaneTilt,
+  PencilSimple,
   Plus,
   Sparkle,
   Tag,
@@ -20,8 +21,9 @@ import { PageHeader } from "@/components/page-header";
 import { Modal, ModalFooter } from "@/components/modal";
 import { PlatformIcon } from "@/lib/platform-icon";
 import { getPlatform, getPlatformLimit, supports } from "@shared/capabilities";
-import { AUTOMATION_TEMPLATES, type AutomationTemplate } from "@shared/automation";
-import type { Automation, Campaign, ConnectedAccount, MediaAsset } from "@shared/types";
+import { type SimpleAutomation } from "@shared/automation";
+import { SimpleAutomationEditor } from "@/features/automations/editor";
+import type { Campaign, ConnectedAccount, MediaAsset } from "@shared/types";
 
 const EMOJIS = ["😀", "🔥", "🎉", "❤️", "👍", "🚀", "✨", "📣", "💡", "📈", "👏", "🙌", "😊", "📷", "🎯", "✅"];
 
@@ -55,11 +57,25 @@ export function ComposerPage() {
     queryFn: () => api.get<Campaign[]>("/api/campaigns"),
   });
   const [attachedTemplates, setAttachedTemplates] = useState<string[]>([]);
-  const [attachedAutomations, setAttachedAutomations] = useState<string[]>([]);
+  const [templateOverrides, setTemplateOverrides] = useState<Record<string, SimpleAutomation>>({});
+  const [editingTemplate, setEditingTemplate] = useState<{
+    id: string;
+    name: string;
+    simple: SimpleAutomation;
+  } | null>(null);
 
-  const { data: publishedAutomations } = useQuery({
-    queryKey: ["automations"],
-    queryFn: () => api.get<Automation[]>("/api/automations"),
+  const { data: automationTemplates } = useQuery({
+    queryKey: ["automation-templates"],
+    queryFn: () =>
+      api.get<{
+        id: string;
+        name: string;
+        description: string;
+        triggerType: string;
+        platforms: string[];
+        builtin: boolean;
+        simple: SimpleAutomation;
+      }[]>("/api/automations/templates"),
   });
 
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
@@ -113,12 +129,12 @@ export function ComposerPage() {
   const activeVariant: VariantState = variants[activeTab] ?? variants[DEFAULT_PLATFORM] ?? emptyVariant();
 
   // Templates relevant to the platforms being published to (or generic ones).
-  const eligibleTemplates = useMemo<AutomationTemplate[]>(
+  const eligibleTemplates = useMemo(
     () =>
-      AUTOMATION_TEMPLATES.filter(
+      (automationTemplates ?? []).filter(
         (t) => t.platforms.length === 0 || t.platforms.some((p) => platforms.includes(p)),
       ),
-    [platforms],
+    [automationTemplates, platforms],
   );
 
   const updateVariant = (key: keyof VariantState, value: string) => {
@@ -198,8 +214,10 @@ export function ComposerPage() {
         scheduledFor: mode === "schedule" && schedule ? new Date(schedule).toISOString() : null,
         publishNow: mode === "now",
         campaignId: campaignId || null,
-        attachTemplateIds: attachedTemplates,
-        attachAutomationIds: attachedAutomations,
+        attachTemplates: attachedTemplates.map((id) => ({
+          templateId: id,
+          simple: templateOverrides[id],
+        })),
       }),
     onSuccess: async (post, { mode }) => {
       if (mode === "approval") {
@@ -404,87 +422,66 @@ export function ComposerPage() {
               {eligibleTemplates.length > 0 && (
                 <div className="border-t border-kumo-line pt-3">
                   <Text as="label" variant="secondary" DANGEROUS_className="mb-1.5 block text-[14px]">
-                    Quick automations
+                    Automations
                   </Text>
                   <div className="grid gap-1.5">
                     {eligibleTemplates.map((t) => {
                       const attached = attachedTemplates.includes(t.id);
+                      const overridden = !!templateOverrides[t.id];
                       return (
-                        <label
-                          key={t.id}
-                          className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-kumo-tint"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={attached}
-                            onChange={() =>
-                              setAttachedTemplates((prev) =>
-                                prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id],
-                              )
-                            }
-                            className="mt-0.5 accent-[var(--color-kumo-brand)]"
-                          />
-                          <span className="grid">
-                            <span className="flex items-center gap-1.5">
-                              <Text DANGEROUS_className="font-medium">{t.name}</Text>
-                              {t.platforms.length > 0 ? (
-                                <span className="flex items-center gap-0.5">
-                                  {t.platforms.map((p) => (
-                                    <PlatformIcon key={p} name={getPlatform(p)?.icon ?? "Circle"} size={13} color={getPlatform(p)?.color} />
-                                  ))}
-                                </span>
-                              ) : (
-                                <span className="text-kumo-subtle">any platform</span>
-                              )}
-                            </span>
-                            <Text variant="secondary" DANGEROUS_className="block text-[14px]">
-                              {t.description}
-                            </Text>
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">
-                    Attached templates are created and published bound to this post when you publish it.
-                  </Text>
-                </div>
-              )}
-
-              {/* Your published automations */}
-              {(publishedAutomations ?? []).filter((a) => a.status === "published").length > 0 && (
-                <div className="border-t border-kumo-line pt-3">
-                  <Text as="label" variant="secondary" DANGEROUS_className="mb-1.5 block text-[14px]">
-                    Your automations
-                  </Text>
-                  <div className="grid gap-1.5">
-                    {(publishedAutomations ?? [])
-                      .filter((a) => a.status === "published")
-                      .map((a) => {
-                        const attached = attachedAutomations.includes(a.id);
-                        return (
-                          <label key={a.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-kumo-tint">
+                        <div key={t.id} className="rounded-md px-2 py-1.5 hover:bg-kumo-tint">
+                          <label className="flex cursor-pointer items-start gap-2">
                             <input
                               type="checkbox"
                               checked={attached}
                               onChange={() =>
-                                setAttachedAutomations((prev) =>
-                                  prev.includes(a.id) ? prev.filter((x) => x !== a.id) : [...prev, a.id],
+                                setAttachedTemplates((prev) =>
+                                  prev.includes(t.id) ? prev.filter((x) => x !== t.id) : [...prev, t.id],
                                 )
                               }
-                              className="accent-[var(--color-kumo-brand)]"
+                              className="mt-0.5 accent-[var(--color-kumo-brand)]"
                             />
-                            <Text DANGEROUS_className="font-medium">{a.name}</Text>
-                            <Text variant="secondary">{a.triggerType.replace("trigger.", "").replace(/_/g, " ")}</Text>
+                            <span className="grid">
+                              <span className="flex items-center gap-1.5">
+                                <Text DANGEROUS_className="font-medium">{t.name}</Text>
+                                {overridden && <Badge variant="info">Edited for this post</Badge>}
+                                {t.platforms.length > 0 ? (
+                                  <span className="flex items-center gap-0.5">
+                                    {t.platforms.map((p) => (
+                                      <PlatformIcon key={p} name={getPlatform(p)?.icon ?? "Circle"} size={13} color={getPlatform(p)?.color} />
+                                    ))}
+                                  </span>
+                                ) : (
+                                  <span className="text-kumo-subtle">any platform</span>
+                                )}
+                              </span>
+                              <Text variant="secondary" DANGEROUS_className="block text-[14px]">
+                                {t.description}
+                              </Text>
+                            </span>
                           </label>
-                        );
-                      })}
+                          {attached && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              className="mt-1.5"
+                              onClick={() => setEditingTemplate({ id: t.id, name: t.name, simple: templateOverrides[t.id] ?? t.simple })}
+                            >
+                              <PencilSimple size={13} /> {overridden ? "Edit this post's automation" : "Customize for this post"}
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <Text variant="secondary" DANGEROUS_className="mt-1 block text-[14px]">
-                    Selected automations are linked to this post.
+                    Attached automations are created and published bound to this post when you publish it — the template
+                    itself is never modified, so it can be reused with different edits on your next posts.
                   </Text>
                 </div>
               )}
+
+              {/* (Per-post automation instances are created from templates above.) */}
             </div>
           </Surface>
         </div>
@@ -557,6 +554,34 @@ export function ComposerPage() {
           </Surface>
         </div>
       </div>
+
+      {/* ---- Per-post automation edit modal ---- */}
+      <Modal
+        open={!!editingTemplate}
+        onOpenChange={(v) => { if (!v) setEditingTemplate(null); }}
+        title={editingTemplate ? `Customize “${editingTemplate.name}”` : ""}
+        description="These edits apply to this post only — the template stays unchanged for your next posts."
+        size="xl"
+        footer={
+          <ModalFooter
+            onClose={() => setEditingTemplate(null)}
+            submitLabel="Save for this post"
+            onSubmit={() => {
+              if (editingTemplate) {
+                setTemplateOverrides((prev) => ({ ...prev, [editingTemplate.id]: editingTemplate.simple }));
+              }
+              setEditingTemplate(null);
+            }}
+          />
+        }
+      >
+        {editingTemplate && (
+          <SimpleAutomationEditor
+            value={editingTemplate.simple}
+            onChange={(next) => setEditingTemplate({ ...editingTemplate, simple: next })}
+          />
+        )}
+      </Modal>
 
       {/* ---- Media picker modal ---- */}
       <MediaPicker

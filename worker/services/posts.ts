@@ -1,10 +1,10 @@
 import type { Env } from "../env";
 import { getPlatform } from "../../shared/capabilities";
-import { AUTOMATION_TEMPLATES, compileSimpleFlow } from "../../shared/automation";
+import { compileSimpleFlow, type SimpleAutomation } from "../../shared/automation";
 import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
 import { enqueuePost } from "./publishing";
-import { createAutomation, publishAutomation } from "./automation";
+import { createAutomation, publishAutomation, getTemplate, validateSimpleAutomation } from "./automation";
 import { audit } from "./audit";
 import type { Post, PostStatus, PostVariant, PostAccountTarget } from "../../shared/types";
 
@@ -25,6 +25,8 @@ export interface CreatePostInput {
   campaignId?: string | null;
   /** Quick-attach template ids; each is instantiated, published and bound to this post. */
   attachTemplateIds?: string[];
+  /** Templates with per-post customizations; the override applies to this post only. */
+  attachTemplates?: { templateId: string; simple?: SimpleAutomation }[];
   /** Existing published automation ids to attach to this post. */
   attachAutomationIds?: string[];
 }
@@ -113,14 +115,22 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
 
   // Quick automation attachments: instantiate each template, publish it and
   // bind it to this post (the comment-to-DM style flows run per post).
-  for (const templateId of input.attachTemplateIds ?? []) {
-    const template = AUTOMATION_TEMPLATES.find((t) => t.id === templateId);
-    if (!template) throw badRequest(`Unknown automation template: ${templateId}`);
-    const definition = { ...compileSimpleFlow(template.simple), simple: template.simple };
+  // `simple` overrides are per-post customizations from the composer — the
+  // template itself is never modified.
+  const templateEntries: { templateId: string; simple?: SimpleAutomation }[] = [
+    ...(input.attachTemplateIds ?? []).map((templateId) => ({ templateId })),
+    ...(input.attachTemplates ?? []),
+  ];
+  for (const entry of templateEntries) {
+    const template = await getTemplate(env, workspaceId, entry.templateId);
+    if (!template) throw badRequest(`Unknown automation template: ${entry.templateId}`);
+    const simple = entry.simple ?? template.simple;
+    validateSimpleAutomation(simple);
+    const definition = { ...compileSimpleFlow(simple), simple };
     const automation = await createAutomation(env, workspaceId, actorId, {
       name: `${template.name} — ${postId.slice(-6)}`,
-      triggerType: template.triggerType,
-      triggerConfig: { ...template.simple.triggerConfig, postId },
+      triggerType: simple.triggerType,
+      triggerConfig: { ...simple.triggerConfig, postId },
       definition,
     });
     await publishAutomation(env, workspaceId, automation.id, definition, actorId);

@@ -22,7 +22,7 @@ import * as approvals from "../services/approvals";
 import * as team from "../services/team";
 import * as accounts_ from "../services/accounts";
 import { getPlatform, PLATFORMS } from "../../shared/capabilities";
-import { AUTOMATION_NODE_TYPES, AUTOMATION_TEMPLATES, compileSimpleFlow, type SimpleAutomation } from "../../shared/automation";
+import { AUTOMATION_NODE_TYPES, compileSimpleFlow, type SimpleAutomation } from "../../shared/automation";
 import { COMPOSIO_SUPPORTED } from "../../shared/composio";
 import * as composio from "../services/composio";
 import { hasAdapter } from "../adapters/registry";
@@ -322,6 +322,10 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
       publishNow: z.boolean().default(false),
       campaignId: z.string().nullish(),
       attachTemplateIds: z.array(z.string()).default([]),
+      attachTemplates: z.array(z.object({
+        templateId: z.string().min(1),
+        simple: z.any().optional(),
+      })).default([]),
       attachAutomationIds: z.array(z.string()).default([]),
     }));
     const post = await posts.createPost(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
@@ -505,7 +509,39 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
   automationRoutes.use("*", requireAuth, requireWorkspace);
   automationRoutes.get("/", async (c) => jsonOk(c, await automations.listAutomations(c.env, c.get("workspace").workspaceId)));
   automationRoutes.get("/node-types", async (c) => jsonOk(c, AUTOMATION_NODE_TYPES));
-  automationRoutes.get("/templates", async (c) => jsonOk(c, AUTOMATION_TEMPLATES));
+
+  // ---------------------------------------------------------------------
+  // Automation templates (the library managed on the Automations page;
+  // instances are created per post from the composer).
+  // ---------------------------------------------------------------------
+  automationRoutes.get("/templates", async (c) =>
+    jsonOk(c, await automations.listTemplates(c.env, c.get("workspace").workspaceId)));
+  automationRoutes.get("/templates/:id", async (c) => {
+    const template = await automations.getTemplate(c.env, c.get("workspace").workspaceId, c.req.param("id"));
+    if (!template) throw badRequest("Template not found");
+    return jsonOk(c, template);
+  });
+  automationRoutes.post("/templates", async (c) => {
+    const input = await parseJson(c, z.object({
+      name: z.string().min(1),
+      triggerType: z.string(),
+      simple: z.any().optional(),
+    }));
+    const result = await automations.createTemplate(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
+    return jsonOk(c, result, 201);
+  });
+  automationRoutes.put("/templates/:id", async (c) => {
+    const input = await parseJson(c, z.object({
+      name: z.string().min(1),
+      simple: z.any(),
+    }));
+    await automations.updateTemplate(c.env, c.get("workspace").workspaceId, c.req.param("id"), c.get("user").userId, input);
+    return jsonOk(c, { ok: true });
+  });
+  automationRoutes.delete("/templates/:id", async (c) => {
+    await automations.deleteTemplate(c.env, c.get("workspace").workspaceId, c.req.param("id"), c.get("user").userId);
+    return jsonOk(c, { ok: true });
+  });
   automationRoutes.get("/:id", async (c) => jsonOk(c, await automations.getAutomation(c.env, c.get("workspace").workspaceId, c.req.param("id"))));
   automationRoutes.get("/:id/latest", async (c) => {
     const row = await c.env.DB.prepare(

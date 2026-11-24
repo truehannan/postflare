@@ -234,6 +234,10 @@ export interface FlowDefinition {
   nodes: FlowNode[];
   edges: FlowEdge[];
   variables?: Record<string, string>;
+  /** The simple (linear) model this graph was compiled from, when saved from
+   *  the static editor. Kept alongside the compiled graph so the editor can
+   *  round-trip the automation without re-linearizing. */
+  simple?: import("./automation").SimpleAutomation;
 }
 
 export type AutomationStatus = "draft" | "published" | "paused";

@@ -171,9 +171,13 @@ async function main() {
     wranglerProc = await startProcess(
       "npx",
       ["wrangler", "dev", "--port", String(WORKER_PORT)],
-      (log) => log.includes(`http://localhost:${WORKER_PORT}`),
+      // Match the explicit ready line — wrangler also prints the port inside
+      // a curl hint for scheduled triggers BEFORE the worker is up.
+      (log) => log.includes(`Ready on http://localhost:${WORKER_PORT}`),
       () => fetch(`${WORKER_URL}/api/integrations`).then(() => true),
     );
+    // Belt and braces: confirm the API actually answers before the suite runs.
+    await waitFor(() => fetch(`${WORKER_URL}/api/integrations`).then((r) => r.status > 0 || true).catch(() => false), 60_000, 500);
 
     console.log("Starting mock provider…");
     mockProc = await startProcess(
@@ -593,6 +597,111 @@ async function runSuite() {
       `SELECT automation_id FROM post_automations WHERE post_id = '${postId}'`]));
     const ids = links[0].results.map((row) => row.automation_id);
     assert(ids.includes(simpleAutoId), "published automation linked to the post");
+  });
+
+  // ---- Automation templates: library + per-post customization --------------------
+  let customTemplateId = "";
+  await test("template CRUD: create, update, list, get", async () => {
+    const created = ok(await api("POST", "/api/automations/templates", {
+      body: {
+        name: "My comment flow",
+        triggerType: "trigger.comment",
+        simple: {
+          triggerType: "trigger.comment",
+          triggerConfig: { accountId: "" },
+          steps: [{ id: "s1", type: "message.text", config: { text: "Original message" } }],
+        },
+      },
+      workspaceId: ws,
+    }));
+    customTemplateId = created.data.data.id;
+
+    const list = ok(await api("GET", "/api/automations/templates", { workspaceId: ws }));
+    const items = list.data.data;
+    assert(items.some((t) => t.id === "instagram-comment-to-dm" && t.builtin), "builtin templates are listed");
+    const mine = items.find((t) => t.id === customTemplateId);
+    assert(mine && !mine.builtin && mine.simple.steps.length === 1, "custom template listed with its model");
+
+    ok(await api("PUT", `/api/automations/templates/${customTemplateId}`, {
+      body: {
+        name: "My comment flow v2",
+        simple: {
+          triggerType: "trigger.comment",
+          triggerConfig: { accountId: "" },
+          steps: [
+            { id: "s1", type: "message.text", config: { text: "Original message" } },
+            { id: "s2", type: "contact.add_tag", config: { tag: "v2" } },
+          ],
+        },
+      },
+      workspaceId: ws,
+    }));
+    const updated = ok(await api("GET", `/api/automations/templates/${customTemplateId}`, { workspaceId: ws }));
+    assert(updated.data.data.name === "My comment flow v2", "template name updated");
+    assert(updated.data.data.simple.steps.length === 2, "template steps updated");
+  });
+  await test("invalid step types are rejected", async () => {
+    const r = await api("POST", "/api/automations/templates", {
+      body: {
+        name: "Bad template",
+        triggerType: "trigger.keyword",
+        simple: { triggerType: "trigger.keyword", triggerConfig: {}, steps: [{ id: "s1", type: "not.a.real.node", config: {} }] },
+      },
+      workspaceId: ws,
+    });
+    assert(r.status === 400, `expected 400 for unknown step type, got ${r.status}`);
+  });
+  await test("per-post customization: instance reflects the edit, template does not", async () => {
+    // Attach the custom template to a post WITH a per-post edit.
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "bluesky", text: "Post with customized automation" }],
+        accountIds: [],
+        attachTemplates: [{
+          templateId: customTemplateId,
+          simple: {
+            triggerType: "trigger.comment",
+            triggerConfig: { accountId: "" },
+            steps: [{ id: "s1", type: "message.text", config: { text: "Edited for THIS post" } }],
+          },
+        }],
+      },
+    }));
+    const postId = r.data.data.id;
+
+    // The instance was created from the EDITED model.
+    const links = JSON.parse(runSync("npx", ["wrangler", "d1", "execute", "postflare-db", "--local", "--json", "--command",
+      `SELECT automation_id FROM post_automations WHERE post_id = '${postId}'`]));
+    const instanceId = links[0].results[0]?.automation_id;
+    assert(!!instanceId, "instance linked to the post");
+    const latest = ok(await api("GET", `/api/automations/${instanceId}/latest`, { workspaceId: ws }));
+    const instanceText = latest.data.data.definition.nodes.find((n) => n.type === "message.text")?.data?.text;
+    assert(instanceText === "Edited for THIS post", `instance uses the per-post edit, got ${instanceText}`);
+
+    // The template itself is untouched.
+    const template = ok(await api("GET", `/api/automations/templates/${customTemplateId}`, { workspaceId: ws }));
+    const templateStep = template.data.data.simple.steps[0];
+    assert(String(templateStep.config.text) === "Original message", "template is unchanged by the per-post edit");
+  });
+  await test("builtin template attaches unedited via attachTemplates", async () => {
+    const r = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "bluesky", text: "Post with builtin template" }],
+        accountIds: [],
+        attachTemplates: [{ templateId: "telegram-welcome-bot" }],
+      },
+    }));
+    assert(r.status === 201, "builtin template attaches without an override");
+  });
+  await test("templates are excluded from the automations list; delete cleans up", async () => {
+    const list = ok(await api("GET", "/api/automations", { workspaceId: ws }));
+    const ids = list.data.data.map((a) => a.id);
+    assert(!ids.includes(customTemplateId), "templates do not appear as active automations");
+    ok(await api("DELETE", `/api/automations/templates/${customTemplateId}`, { workspaceId: ws }));
+    const gone = await api("GET", `/api/automations/templates/${customTemplateId}`, { workspaceId: ws });
+    assert(gone.status === 400, `deleted template is gone, got ${gone.status}`);
   });
 
   // ---- Composio auth gateway (Postflare user, hosted authorization) --------------

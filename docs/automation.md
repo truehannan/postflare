@@ -1,3 +1,27 @@
+## Template-first model
+
+The **Automations page is a template library** — templates are designs that
+never run by themselves. The built-in templates (Instagram comment-to-DM,
+Telegram welcome bot, WhatsApp lead qualification, FAQ) live beside your own
+custom templates (create, edit, delete them there).
+
+**The composer is where automations become real.** Attach a template to a
+post and click *Customize for this post* to open the same static editor
+pre-filled from the template. Those edits apply **to that post only** — the
+template is never modified, so the same template can be reused with different
+keywords/messages on the next post. On publish, each attached template is
+instantiated, published and bound to the post (`post_automations`), with the
+customized model if one was provided. Active instances (with their execution
+history) are listed under *Active automations* on the Automations page.
+
+API surface:
+
+- `GET/POST /api/automations/templates`, `GET/PUT/DELETE /api/automations/templates/:id`
+- `POST /api/posts` accepts `attachTemplates: [{ templateId, simple? }]` (the
+  optional `simple` is the per-post override; step types are validated against
+  the node catalog) — `attachTemplateIds` still works without overrides
+- `GET /api/automations` lists active instances only (templates excluded)
+
 ## Editor
 
 Automations are edited with a simple, static form interface — no node canvas.

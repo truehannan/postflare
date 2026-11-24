@@ -5,6 +5,13 @@ import { notify } from "./notifications";
 import { audit } from "./audit";
 import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
+import {
+  AUTOMATION_TEMPLATES,
+  getNodeType,
+  compileSimpleFlow,
+  tryLinearizeFlow,
+  type SimpleAutomation,
+} from "../../shared/automation";
 import type { Automation, AutomationVersion, FlowDefinition, FlowNode } from "../../shared/types";
 
 const MAX_STEPS = 100;
@@ -84,7 +91,7 @@ export async function getAutomation(env: Env, workspaceId: string, automationId:
 
 export async function listAutomations(env: Env, workspaceId: string): Promise<Automation[]> {
   const rows = await env.DB.prepare(
-    "SELECT * FROM automations WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC",
+    "SELECT * FROM automations WHERE workspace_id = ? AND deleted_at IS NULL AND status != 'template' ORDER BY updated_at DESC",
   ).bind(workspaceId).all<Record<string, unknown>>();
   return (rows.results ?? []).map((r) => ({
     id: r.id as string,
@@ -115,6 +122,159 @@ export async function getAutomationVersion(
     definition: JSON.parse(row.definition_json as string) as FlowDefinition,
     createdAt: row.created_at as string,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Automation templates — the library users manage on the Automations page.
+// Actual instances are created per post, in the composer, from these
+// templates (optionally customized; the template itself is never modified).
+// ---------------------------------------------------------------------------
+
+export interface AutomationTemplateView {
+  id: string;
+  name: string;
+  description: string;
+  triggerType: string;
+  /** Postflare platform ids this template is relevant to; empty = any. */
+  platforms: string[];
+  builtin: boolean;
+  simple: SimpleAutomation;
+}
+
+/** Validate a simple model: catalog-known trigger + step types, compilable. */
+export function validateSimpleAutomation(simple: SimpleAutomation): void {
+  const trigger = getNodeType(simple.triggerType);
+  if (!trigger?.isTrigger) throw badRequest(`Unknown trigger type: ${simple.triggerType}`);
+  for (const step of simple.steps) {
+    if (!getNodeType(step.type)) throw badRequest(`Unknown step type: ${step.type}`);
+  }
+  validateFlow(compileSimpleFlow(simple));
+}
+
+/** Load the simple model stored for an automation (latest version). */
+async function getSimpleForAutomation(env: Env, automationId: string): Promise<SimpleAutomation> {
+  const row = await env.DB.prepare(
+    "SELECT definition_json FROM automation_versions WHERE automation_id = ? ORDER BY version DESC LIMIT 1",
+  ).bind(automationId).first<{ definition_json: string }>();
+  if (!row) return { triggerType: "trigger.keyword", triggerConfig: { keywords: "hi" }, steps: [] };
+  const def = JSON.parse(row.definition_json) as FlowDefinition & { simple?: SimpleAutomation };
+  if (def.simple) return def.simple;
+  return tryLinearizeFlow(def).simple;
+}
+
+const CUSTOM_TEMPLATE_DESCRIPTION = "Custom template — attach it from the composer and edit it per post.";
+
+export async function listTemplates(env: Env, workspaceId: string): Promise<AutomationTemplateView[]> {
+  const rows = await env.DB.prepare(
+    "SELECT id, name, trigger_type FROM automations WHERE workspace_id = ? AND status = 'template' AND deleted_at IS NULL ORDER BY updated_at DESC",
+  ).bind(workspaceId).all<{ id: string; name: string; trigger_type: string }>();
+
+  const user: AutomationTemplateView[] = [];
+  for (const row of rows.results ?? []) {
+    user.push({
+      id: row.id,
+      name: row.name,
+      description: CUSTOM_TEMPLATE_DESCRIPTION,
+      triggerType: row.trigger_type,
+      platforms: [],
+      builtin: false,
+      simple: await getSimpleForAutomation(env, row.id),
+    });
+  }
+
+  const builtin: AutomationTemplateView[] = AUTOMATION_TEMPLATES.map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    triggerType: t.triggerType,
+    platforms: t.platforms,
+    builtin: true,
+    simple: t.simple,
+  }));
+
+  return [...builtin, ...user];
+}
+
+export async function getTemplate(env: Env, workspaceId: string, templateId: string): Promise<AutomationTemplateView | null> {
+  const builtin = AUTOMATION_TEMPLATES.find((t) => t.id === templateId);
+  if (builtin) {
+    return {
+      id: builtin.id,
+      name: builtin.name,
+      description: builtin.description,
+      triggerType: builtin.triggerType,
+      platforms: builtin.platforms,
+      builtin: true,
+      simple: builtin.simple,
+    };
+  }
+  const row = await env.DB.prepare(
+    "SELECT id, name, trigger_type FROM automations WHERE id = ? AND workspace_id = ? AND status = 'template' AND deleted_at IS NULL",
+  ).bind(templateId, workspaceId).first<{ id: string; name: string; trigger_type: string }>();
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    description: CUSTOM_TEMPLATE_DESCRIPTION,
+    triggerType: row.trigger_type,
+    platforms: [],
+    builtin: false,
+    simple: await getSimpleForAutomation(env, row.id),
+  };
+}
+
+export async function createTemplate(
+  env: Env,
+  workspaceId: string,
+  actorId: string,
+  input: { name: string; triggerType: string; simple?: SimpleAutomation },
+): Promise<{ id: string }> {
+  if (!input.name.trim()) throw badRequest("Template name is required");
+  const simple = input.simple ?? { triggerType: input.triggerType, triggerConfig: {}, steps: [] };
+  validateSimpleAutomation(simple);
+
+  const id = randomId("tmpl");
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    "INSERT INTO automations (id, workspace_id, name, status, trigger_type, trigger_config_json, published_version, created_by, created_at, updated_at) VALUES (?, ?, ?, 'template', ?, '{}', NULL, ?, ?, ?)",
+  ).bind(id, workspaceId, input.name.trim(), simple.triggerType, actorId, now, now).run();
+  await saveVersion(env, id, { ...compileSimpleFlow(simple), simple }, actorId, 1);
+  await audit(env, workspaceId, actorId, "template.create", "automations", id, {});
+  return { id };
+}
+
+export async function updateTemplate(
+  env: Env,
+  workspaceId: string,
+  templateId: string,
+  actorId: string,
+  input: { name: string; simple: SimpleAutomation },
+): Promise<void> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM automations WHERE id = ? AND workspace_id = ? AND status = 'template' AND deleted_at IS NULL",
+  ).bind(templateId, workspaceId).first<{ id: string }>();
+  if (!row) throw notFound("Template not found");
+  if (!input.name.trim()) throw badRequest("Template name is required");
+  validateSimpleAutomation(input.simple);
+
+  const maxRow = await env.DB.prepare(
+    "SELECT COALESCE(MAX(version), 0) AS mv FROM automation_versions WHERE automation_id = ?",
+  ).bind(templateId).first<{ mv: number }>();
+  await saveVersion(env, templateId, { ...compileSimpleFlow(input.simple), simple: input.simple }, actorId, (maxRow?.mv ?? 0) + 1);
+  await env.DB.prepare(
+    "UPDATE automations SET name = ?, trigger_type = ?, updated_at = ? WHERE id = ?",
+  ).bind(input.name.trim(), input.simple.triggerType, new Date().toISOString(), templateId).run();
+  await audit(env, workspaceId, actorId, "template.update", "automations", templateId, {});
+}
+
+export async function deleteTemplate(env: Env, workspaceId: string, templateId: string, actorId: string): Promise<void> {
+  const row = await env.DB.prepare(
+    "SELECT id FROM automations WHERE id = ? AND workspace_id = ? AND status = 'template' AND deleted_at IS NULL",
+  ).bind(templateId, workspaceId).first<{ id: string }>();
+  if (!row) throw notFound("Template not found");
+  await env.DB.prepare("UPDATE automations SET deleted_at = ?, updated_at = ? WHERE id = ?")
+    .bind(new Date().toISOString(), new Date().toISOString(), templateId).run();
+  await audit(env, workspaceId, actorId, "template.delete", "automations", templateId, {});
 }
 
 export async function deleteAutomation(env: Env, workspaceId: string, automationId: string, actorId: string): Promise<void> {
