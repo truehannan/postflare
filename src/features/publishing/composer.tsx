@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Input, Select, Surface, Tabs, Text, Textarea } from "@cloudflare/kumo";
 import {
@@ -56,6 +56,7 @@ export function ComposerPage() {
     queryKey: ["campaigns"],
     queryFn: () => api.get<Campaign[]>("/api/campaigns"),
   });
+
   const [attachedTemplates, setAttachedTemplates] = useState<string[]>([]);
   const [templateOverrides, setTemplateOverrides] = useState<Record<string, SimpleAutomation>>({});
   const [editingTemplate, setEditingTemplate] = useState<{
@@ -86,9 +87,40 @@ export function ComposerPage() {
   const [hashtags, setHashtags] = useState<string[]>([]);
   const [hashtagInput, setHashtagInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [schedule, setSchedule] = useState("");
+  const [searchParams] = useSearchParams();
+  const sourceIdeaId = searchParams.get("idea") ?? null;
+  const [ideaLoaded, setIdeaLoaded] = useState(false);
+  const [schedule, setSchedule] = useState(() => {
+    const date = searchParams.get("date");
+    return date ? new Date(`${date}T10:00:00`).toISOString().slice(0, 16) : "";
+  });
   const [campaignId, setCampaignId] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Prefill from a planner idea (?idea=): text, campaign and planned date.
+  const { data: sourceIdea } = useQuery({
+    queryKey: ["planner-item", sourceIdeaId],
+    queryFn: () =>
+      api.get<{
+        id: string;
+        title: string;
+        notes: string | null;
+        campaignId: string | null;
+        dueAt: string | null;
+      }>(`/api/planner/${sourceIdeaId}`),
+    enabled: !!sourceIdeaId && !ideaLoaded,
+  });
+  if (sourceIdea && !ideaLoaded) {
+    setIdeaLoaded(true);
+    setVariants((prev) => ({
+      ...prev,
+      [DEFAULT_PLATFORM]: { ...(prev[DEFAULT_PLATFORM] ?? emptyVariant()), text: sourceIdea.notes || sourceIdea.title },
+    }));
+    if (sourceIdea.campaignId) setCampaignId(sourceIdea.campaignId);
+    if (sourceIdea.dueAt && !schedule) {
+      setSchedule(new Date(sourceIdea.dueAt).toISOString().slice(0, 16));
+    }
+  }
 
   const mediaAssets = mediaData?.items ?? [];
 
@@ -218,6 +250,7 @@ export function ComposerPage() {
           templateId: id,
           simple: templateOverrides[id],
         })),
+        sourceIdeaId: sourceIdeaId ?? undefined,
       }),
     onSuccess: async (post, { mode }) => {
       if (mode === "approval") {

@@ -12,6 +12,7 @@ import {
   GitBranch,
   House,
   ImagesSquare,
+  Lightbulb,
   Megaphone,
   PaperPlaneTilt,
   PencilLine,
@@ -41,6 +42,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: "Publishing",
     items: [
       { to: "/publishing/composer", label: "Composer", icon: PaperPlaneTilt },
+      { to: "/planner", label: "Planner", icon: Lightbulb },
       { to: "/publishing/calendar", label: "Calendar", icon: CalendarBlank },
       { to: "/publishing/queue", label: "Queue", icon: Queue },
       { to: "/publishing/drafts", label: "Drafts", icon: PencilLine },

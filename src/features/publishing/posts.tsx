@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Surface, Text } from "@cloudflare/kumo";
 import { api } from "@/lib/api";
@@ -14,10 +15,13 @@ const TITLES: Record<string, string> = {
 
 export function PostsPage({ status }: { status: string }) {
   const queryClient = useQueryClient();
+  const isQueue = status === "queued";
+  const queryStatus = isQueue ? "scheduled,queued,approved" : status;
   const { data, isLoading } = useQuery({
-    queryKey: ["posts", status],
-    queryFn: () => api.get<{ items: Post[]; nextCursor: string | null }>(`/api/posts?status=${status}&limit=100`),
+    queryKey: ["posts", queryStatus],
+    queryFn: () => api.get<{ items: Post[]; nextCursor: string | null }>(`/api/posts?status=${queryStatus}&limit=100`),
   });
+  const [rescheduling, setRescheduling] = useState<Record<string, string>>({});
 
   const cancel = useMutation({
     mutationFn: (id: string) => api.post(`/api/posts/${id}/cancel`),
@@ -26,6 +30,15 @@ export function PostsPage({ status }: { status: string }) {
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/posts/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["posts"] }),
+  });
+  const reschedule = useMutation({
+    mutationFn: ({ id, scheduledFor }: { id: string; scheduledFor: string }) =>
+      api.patch(`/api/posts/${id}/schedule`, { scheduledFor }),
+    onSuccess: () => {
+      setRescheduling({});
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+    },
   });
 
   const posts = data?.items ?? [];
@@ -65,7 +78,29 @@ export function PostsPage({ status }: { status: string }) {
                       </div>
                     ))}
                   </div>
-                  <div className="flex shrink-0 gap-1">
+                  <div className="flex shrink-0 items-center gap-1">
+                    {isQueue && post.scheduledFor && ["scheduled", "approved", "queued"].includes(post.status) && (
+                      <>
+                        <input
+                          type="datetime-local"
+                          className="rounded-md border border-kumo-line bg-kumo-base px-2 py-1 text-[14px]"
+                          value={(rescheduling[post.id] ?? post.scheduledFor).slice(0, 16)}
+                          onChange={(e) =>
+                            setRescheduling((prev) => ({ ...prev, [post.id]: new Date(e.target.value).toISOString() }))
+                          }
+                        />
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={!rescheduling[post.id] || rescheduling[post.id] === post.scheduledFor}
+                          onClick={() =>
+                            reschedule.mutate({ id: post.id, scheduledFor: rescheduling[post.id] })
+                          }
+                        >
+                          Move
+                        </Button>
+                      </>
+                    )}
                     {["scheduled", "queued", "publishing"].includes(post.status) && (
                       <Button variant="secondary" size="sm" onClick={() => cancel.mutate(post.id)}>Cancel</Button>
                     )}

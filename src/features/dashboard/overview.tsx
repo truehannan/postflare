@@ -13,6 +13,9 @@ interface Overview {
   failures: number;
   unreadConversations: number;
   activeAutomations: number;
+  plannerIdeas: number;
+  plannerInReview: number;
+  upcomingThisWeek: number;
   recentPosts: { id: string; status: string; scheduled_for: string | null; created_at: string }[];
 }
 
@@ -48,13 +51,16 @@ export function OverviewPage() {
           <Text variant="secondary">Loading…</Text>
         ) : (
           <div className="grid gap-4">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-9">
               <Stat label="Connected accounts" value={data.accounts} href="/settings/accounts" />
               <Stat label="Published posts" value={data.publishedPosts} href="/publishing/published" />
               <Stat label="Scheduled" value={data.scheduledPosts} href="/publishing/calendar" />
+              <Stat label="This week" value={data.upcomingThisWeek} href="/publishing/calendar" />
               <Stat label="Failures" value={data.failures} href="/publishing/queue" />
               <Stat label="Unread inbox" value={data.unreadConversations} href="/inbox" />
               <Stat label="Active automations" value={data.activeAutomations} href="/automations" />
+              <Stat label="Planner ideas" value={data.plannerIdeas} href="/planner" />
+              <Stat label="In review" value={data.plannerInReview} href="/planner" />
             </div>
 
             <Surface className="rounded-lg">

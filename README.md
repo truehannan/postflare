@@ -26,6 +26,7 @@ integration adapter.
 
 | Area | Status |
 | --- | --- |
+| **Content planner** — idea board (drag-and-drop), idea→post conversion, rich calendar (month/week/list, drag-to-reschedule), planner stats | ✅ |
 | **Composio hub** — every supported platform via one API key | ✅ |
 | Quick automations attached per-post from the composer | ✅ |
 | Data retention (cron-enforced purge policies) | ✅ |

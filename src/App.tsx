@@ -7,6 +7,7 @@ import { RegisterPage } from "@/features/auth/register";
 import { OverviewPage } from "@/features/dashboard/overview";
 import { ComposerPage } from "@/features/publishing/composer";
 import { CalendarPage } from "@/features/publishing/calendar";
+import { PlannerBoardPage } from "@/features/planner/board";
 import { PostsPage } from "@/features/publishing/posts";
 import { InboxPage } from "@/features/inbox/inbox";
 import { ContactsPage } from "@/features/contacts/contacts";
@@ -40,6 +41,7 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/overview" replace /> },
       { path: "overview", element: <OverviewPage /> },
       { path: "publishing/composer", element: <ComposerPage /> },
+      { path: "planner", element: <PlannerBoardPage /> },
       { path: "publishing/calendar", element: <CalendarPage /> },
       { path: "publishing/queue", element: <PostsPage status="queued" /> },
       { path: "publishing/drafts", element: <PostsPage status="draft" /> },

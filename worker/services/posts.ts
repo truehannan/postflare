@@ -5,6 +5,7 @@ import { randomId } from "../utils/id";
 import { badRequest, notFound } from "../utils/http";
 import { enqueuePost } from "./publishing";
 import { createAutomation, publishAutomation, getTemplate, validateSimpleAutomation } from "./automation";
+import { markIdeaConverted } from "./planner";
 import { audit } from "./audit";
 import type { Post, PostStatus, PostVariant, PostAccountTarget } from "../../shared/types";
 
@@ -29,6 +30,8 @@ export interface CreatePostInput {
   attachTemplates?: { templateId: string; simple?: SimpleAutomation }[];
   /** Existing published automation ids to attach to this post. */
   attachAutomationIds?: string[];
+  /** Planner idea this post was created from (links + completes the idea). */
+  sourceIdeaId?: string;
 }
 
 export interface PostFilter {
@@ -108,6 +111,11 @@ export async function createPost(env: Env, workspaceId: string, actorId: string,
   }
 
   await audit(env, workspaceId, actorId, "post.create", "posts", postId, { status, accounts: accounts.length });
+
+  // Link back to the planner idea this post was created from.
+  if (input.sourceIdeaId) {
+    await markIdeaConverted(env, workspaceId, input.sourceIdeaId, postId);
+  }
 
   if (input.publishNow) {
     await enqueuePost(env, workspaceId, postId, actorId);
@@ -214,8 +222,12 @@ export async function listPosts(env: Env, workspaceId: string, filter: PostFilte
   const conditions = ["workspace_id = ?", "deleted_at IS NULL"];
   const params: unknown[] = [workspaceId];
   if (filter.status) {
-    conditions.push("status = ?");
-    params.push(filter.status);
+    // Comma-separated statuses (queue view merges scheduled + queued).
+    const statuses = filter.status.split(",").map((s) => s.trim()).filter(Boolean);
+    if (statuses.length) {
+      conditions.push(`status IN (${statuses.map(() => "?").join(",")})`);
+      params.push(...statuses);
+    }
   }
   if (filter.campaignId) {
     conditions.push("campaign_id = ?");
@@ -260,6 +272,31 @@ export async function updatePostStatus(
   if (nextStatus === "scheduled") {
     await enqueuePost(env, workspaceId, postId, actorId);
   }
+  return (await getPost(env, workspaceId, postId))!;
+}
+
+/** Move a scheduled post to a new time (calendar drag-and-drop). */
+export async function reschedulePost(
+  env: Env,
+  workspaceId: string,
+  postId: string,
+  scheduledFor: string,
+  actorId: string,
+): Promise<Post> {
+  const post = await env.DB.prepare(
+    "SELECT id, status FROM posts WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+  ).bind(postId, workspaceId).first<{ id: string; status: string }>();
+  if (!post) throw notFound("Post not found");
+  if (!["scheduled", "approved", "draft"].includes(post.status)) {
+    throw badRequest(`Only scheduled posts can be rescheduled (this one is '${post.status}')`);
+  }
+  const when = new Date(scheduledFor);
+  if (Number.isNaN(when.getTime())) throw badRequest("Invalid schedule time");
+
+  const now = new Date().toISOString();
+  await env.DB.prepare("UPDATE posts SET scheduled_for = ?, status = 'scheduled', updated_at = ? WHERE id = ?")
+    .bind(when.toISOString(), now, postId).run();
+  await audit(env, workspaceId, actorId, "post.reschedule", "posts", postId, { scheduledFor: when.toISOString() });
   return (await getPost(env, workspaceId, postId))!;
 }
 

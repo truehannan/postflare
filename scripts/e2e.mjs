@@ -288,6 +288,7 @@ async function runSuite() {
 
   // ---- Posts: composer fields ---------------------------------------------
   let draftId = "";
+  let scheduledPostId = "";
   await test("create draft with advanced composer fields", async () => {
     const r = ok(await api("POST", "/api/posts", {
       workspaceId: ws,
@@ -315,9 +316,11 @@ async function runSuite() {
       workspaceId: ws,
       body: { variants: [{ providerId: "bluesky", text: "Scheduled" }], accountIds: [accounts.bluesky], scheduledFor: future },
     }));
+    scheduledPostId = r.data.data.id;
     assert(r.data.data.status === "scheduled", "scheduled status");
     const cal = ok(await api("GET", "/api/calendar", { workspaceId: ws }));
-    assert(cal.data.data.length >= 1, "calendar lists scheduled post");
+    assert((cal.data.data.posts ?? []).length >= 1, "calendar lists scheduled post");
+    assert(Array.isArray(cal.data.data.items), "calendar includes planner items");
   });
 
   // ---- Immediate publish through the queue → mock providers -----------------
@@ -558,6 +561,87 @@ async function runSuite() {
     assert(typeof container.args.image_url === "string" && container.args.image_url.startsWith(WORKER_URL), "media url resolved to the worker");
     const publish = inspect.composio.actions.find((a) => a.slug === "INSTAGRAM_POST_IG_USER_MEDIA_PUBLISH");
     assert(publish && publish.args.creation_id === "17890000000000001", "publish tool called with the container id");
+  });
+
+  // ---- Content planner -------------------------------------------------------------
+  let ideaId = "";
+  await test("planner: create ideas with platform, campaign, tags and due date", async () => {
+    const camp = ok(await api("POST", "/api/campaigns", { body: { name: "Planner campaign" }, workspaceId: ws }));
+    const campaignId = camp.data.data.id;
+    const idea = ok(await api("POST", "/api/planner", {
+      body: {
+        title: "BTS reel idea",
+        notes: "Show the studio setup end to end",
+        platformId: "instagram",
+        campaignId,
+        tags: ["behind-the-scenes"],
+        dueAt: new Date(Date.now() + 3 * 86400_000).toISOString(),
+      },
+      workspaceId: ws,
+    }));
+    ideaId = idea.data.data.id;
+    assert(idea.data.data.status === "idea", "starts in the idea column");
+
+    ok(await api("POST", "/api/planner", { body: { title: "Second idea", platformId: "x" }, workspaceId: ws }));
+    const list = ok(await api("GET", "/api/planner?search=BTS", { workspaceId: ws }));
+    assert(list.data.data.length === 1, "search filter matches title/notes");
+    const byPlatform = ok(await api("GET", "/api/planner?platformId=x", { workspaceId: ws }));
+    assert(byPlatform.data.data.length === 1 && byPlatform.data.data[0].title === "Second idea", "platform filter");
+  });
+  await test("planner: move an idea through the board", async () => {
+    ok(await api("PATCH", `/api/planner/${ideaId}`, { body: { status: "drafting" }, workspaceId: ws }));
+    ok(await api("PATCH", `/api/planner/${ideaId}`, { body: { status: "review", tags: ["behind-the-scenes", "reels"] }, workspaceId: ws }));
+    const item = ok(await api("GET", `/api/planner/${ideaId}`, { workspaceId: ws }));
+    assert(item.data.data.status === "review", "status moved via board drop");
+    assert(item.data.data.tags.length === 2, "tags updated");
+    const invalid = await api("PATCH", `/api/planner/${ideaId}`, { body: { status: "bogus" }, workspaceId: ws });
+    assert(invalid.status === 400, `invalid status rejected, got ${invalid.status}`);
+  });
+  await test("planner: idea appears on the calendar by due date", async () => {
+    const cal = ok(await api("GET", "/api/calendar", { workspaceId: ws }));
+    const onCalendar = (cal.data.data.items ?? []).find((i) => i.id === ideaId);
+    assert(!!onCalendar, "idea overlaid on the calendar");
+  });
+  await test("planner: converting an idea to a post links and completes it", async () => {
+    const post = ok(await api("POST", "/api/posts", {
+      workspaceId: ws,
+      body: {
+        variants: [{ providerId: "bluesky", text: "Post from the BTS idea" }],
+        accountIds: [],
+        sourceIdeaId: ideaId,
+      },
+    }));
+    const idea = ok(await api("GET", `/api/planner/${ideaId}`, { workspaceId: ws }));
+    assert(idea.data.data.status === "done", "idea moved to done on conversion");
+    assert(idea.data.data.postId === post.data.data.id, "idea linked to the created post");
+  });
+  await test("planner: delete cleans up", async () => {
+    ok(await api("POST", "/api/planner", { body: { title: "To delete" }, workspaceId: ws }));
+    const list = ok(await api("GET", "/api/planner?search=To%20delete", { workspaceId: ws }));
+    const target = list.data.data[0];
+    ok(await api("DELETE", `/api/planner/${target.id}`, { workspaceId: ws }));
+    const gone = await api("GET", `/api/planner/${target.id}`, { workspaceId: ws });
+    assert(gone.status === 404, "deleted idea is gone");
+  });
+  await test("reschedule a scheduled post (calendar drag-and-drop)", async () => {
+    const newDate = new Date(Date.now() + 5 * 86400_000).toISOString();
+    const r = ok(await api("PATCH", `/api/posts/${scheduledPostId}/schedule`, { body: { scheduledFor: newDate }, workspaceId: ws }));
+    assert(r.data.data.scheduledFor.slice(0, 10) === newDate.slice(0, 10), "post moved to the new date");
+    const cal = ok(await api("GET", "/api/calendar", { workspaceId: ws }));
+    const moved = (cal.data.data.posts ?? []).find((p) => p.id === scheduledPostId);
+    assert(moved && moved.scheduled_for.slice(0, 10) === newDate.slice(0, 10), "calendar reflects the new date");
+  });
+  await test("queue lists scheduled and queued posts together", async () => {
+    const list = ok(await api("GET", "/api/posts?status=scheduled,queued,approved&limit=100", { workspaceId: ws }));
+    const statuses = new Set(list.data.data.items.map((p) => p.status));
+    assert(statuses.has("scheduled"), "scheduled posts in the queue");
+  });
+  await test("overview includes planner stats", async () => {
+    const ov = ok(await api("GET", "/api/analytics/overview", { workspaceId: ws }));
+    assert(typeof ov.data.data.plannerIdeas === "number", "plannerIdeas present");
+    assert(typeof ov.data.data.plannerInReview === "number", "plannerInReview present");
+    assert(typeof ov.data.data.upcomingThisWeek === "number", "upcomingThisWeek present");
+    assert(ov.data.data.plannerIdeas >= 1, "idea count reflects the board");
   });
 
   // ---- Simple (linear) automation format ----------------------------------------

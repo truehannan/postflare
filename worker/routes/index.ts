@@ -21,6 +21,7 @@ import * as campaigns from "../services/campaigns";
 import * as approvals from "../services/approvals";
 import * as team from "../services/team";
 import * as accounts_ from "../services/accounts";
+import * as planner from "../services/planner";
 import { getPlatform, PLATFORMS } from "../../shared/capabilities";
 import { AUTOMATION_NODE_TYPES, compileSimpleFlow, type SimpleAutomation } from "../../shared/automation";
 import { COMPOSIO_SUPPORTED } from "../../shared/composio";
@@ -327,9 +328,15 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
         simple: z.any().optional(),
       })).default([]),
       attachAutomationIds: z.array(z.string()).default([]),
+      sourceIdeaId: z.string().optional(),
     }));
     const post = await posts.createPost(c.env, c.get("workspace").workspaceId, c.get("user").userId, input);
     return jsonOk(c, post, 201);
+  });
+  postRoutes.patch("/:id/schedule", async (c) => {
+    const input = await parseJson(c, z.object({ scheduledFor: z.string().min(1) }));
+    const post = await posts.reschedulePost(c.env, c.get("workspace").workspaceId, c.req.param("id"), input.scheduledFor, c.get("user").userId);
+    return jsonOk(c, post);
   });
   postRoutes.patch("/:id/status", async (c) => {
     const input = await parseJson(c, z.object({ status: z.enum(["draft", "scheduled", "approved", "cancelled", "awaiting_approval"]) }));
@@ -350,16 +357,67 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
   });
   app.route("/api/posts", postRoutes);
 
-  // Calendar
+  // -----------------------------------------------------------------------
+  // Content planner (ideas → board → converted posts)
+  // -----------------------------------------------------------------------
+  const plannerRoutes = new Hono<AppCtx>();
+  plannerRoutes.use("*", requireAuth, requireWorkspace);
+  plannerRoutes.get("/", async (c) => {
+    const items = await planner.listPlannerItems(c.env, c.get("workspace").workspaceId, {
+      status: c.req.query("status"),
+      platformId: c.req.query("platformId"),
+      campaignId: c.req.query("campaignId"),
+      search: c.req.query("search"),
+      tag: c.req.query("tag"),
+    });
+    return jsonOk(c, items);
+  });
+  plannerRoutes.post("/", async (c) => {
+    const input = await parseJson(c, z.object({
+      title: z.string().min(1),
+      notes: z.string().nullish(),
+      platformId: z.string().nullish(),
+      campaignId: z.string().nullish(),
+      tags: z.array(z.string()).default([]),
+      dueAt: z.string().nullish(),
+      status: z.enum(["idea", "drafting", "review", "approved", "done"]).optional(),
+    }));
+    return jsonOk(c, await planner.createPlannerItem(c.env, c.get("workspace").workspaceId, c.get("user").userId, input), 201);
+  });
+  plannerRoutes.get("/:id", async (c) =>
+    jsonOk(c, await planner.getPlannerItem(c.env, c.get("workspace").workspaceId, c.req.param("id"))));
+  plannerRoutes.patch("/:id", async (c) => {
+    const input = await parseJson(c, z.object({
+      title: z.string().min(1).optional(),
+      notes: z.string().nullish(),
+      platformId: z.string().nullish(),
+      status: z.enum(["idea", "drafting", "review", "approved", "done"]).optional(),
+      campaignId: z.string().nullish(),
+      tags: z.array(z.string()).optional(),
+      dueAt: z.string().nullish(),
+    }));
+    return jsonOk(c, await planner.updatePlannerItem(c.env, c.get("workspace").workspaceId, c.req.param("id"), input));
+  });
+  plannerRoutes.delete("/:id", async (c) => {
+    await planner.deletePlannerItem(c.env, c.get("workspace").workspaceId, c.req.param("id"));
+    return jsonOk(c, { ok: true });
+  });
+  app.route("/api/planner", plannerRoutes);
+
+  // Calendar — scheduled posts + planner items (due dates) in one range.
   const calendarRoutes = new Hono<AppCtx>();
   calendarRoutes.use("*", requireAuth, requireWorkspace);
   calendarRoutes.get("/", async (c) => {
+    const wsId = c.get("workspace").workspaceId;
     const start = c.req.query("start") ?? new Date(Date.now() - 30 * 86400_000).toISOString();
-    const end = c.req.query("end") ?? new Date(Date.now() + 60 * 86400_000).toISOString();
-    const rows = await c.env.DB.prepare(
-      "SELECT id, status, scheduled_for, created_at FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND scheduled_for IS NOT NULL AND scheduled_for BETWEEN ? AND ? ORDER BY scheduled_for ASC",
-    ).bind(c.get("workspace").workspaceId, start, end).all<Record<string, unknown>>();
-    return jsonOk(c, rows.results ?? []);
+    const end = c.req.query("end") ?? new Date(Date.now() + 90 * 86400_000).toISOString();
+    const posts = await c.env.DB.prepare(
+      "SELECT id, status, scheduled_for, campaign_id, created_at FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND scheduled_for IS NOT NULL AND scheduled_for BETWEEN ? AND ? ORDER BY scheduled_for ASC",
+    ).bind(wsId, start, end).all<Record<string, unknown>>();
+    const items = await c.env.DB.prepare(
+      "SELECT id, title, status, platform_id, campaign_id, due_at, post_id FROM content_items WHERE workspace_id = ? AND deleted_at IS NULL AND due_at IS NOT NULL AND due_at BETWEEN ? AND ? ORDER BY due_at ASC",
+    ).bind(wsId, start, end).all<Record<string, unknown>>();
+    return jsonOk(c, { posts: posts.results ?? [], items: items.results ?? [] });
   });
   app.route("/api/calendar", calendarRoutes);
 
@@ -594,13 +652,17 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
   analyticsRoutes.use("*", requireAuth, requireWorkspace);
   analyticsRoutes.get("/overview", async (c) => {
     const ws = c.get("workspace").workspaceId;
-    const [acctCount, postCount, scheduledCount, failedCount, unreadCount, autoCount] = await Promise.all([
+    const [acctCount, postCount, scheduledCount, failedCount, unreadCount, autoCount, plannerCounts, upcomingWeek] = await Promise.all([
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM connected_accounts WHERE workspace_id = ?").bind(ws).first<{ n: number }>(),
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'published'").bind(ws).first<{ n: number }>(),
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND status IN ('scheduled','queued','approved')").bind(ws).first<{ n: number }>(),
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND status IN ('failed','partially_published')").bind(ws).first<{ n: number }>(),
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM conversations WHERE workspace_id = ? AND unread_count > 0").bind(ws).first<{ n: number }>(),
       c.env.DB.prepare("SELECT COUNT(*) AS n FROM automations WHERE workspace_id = ? AND status = 'published' AND deleted_at IS NULL").bind(ws).first<{ n: number }>(),
+      planner.plannerStats(c.env, ws),
+      c.env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM posts WHERE workspace_id = ? AND deleted_at IS NULL AND status IN ('scheduled','queued','approved') AND scheduled_for IS NOT NULL AND scheduled_for <= ?",
+      ).bind(ws, new Date(Date.now() + 7 * 86400_000).toISOString()).first<{ n: number }>(),
     ]);
     const recentPosts = await c.env.DB.prepare(
       "SELECT id, status, scheduled_for, created_at FROM posts WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 10",
@@ -612,6 +674,9 @@ export function registerRoutes(app: Hono<{ Bindings: Env; Variables: { user: Aut
       failures: failedCount?.n ?? 0,
       unreadConversations: unreadCount?.n ?? 0,
       activeAutomations: autoCount?.n ?? 0,
+      plannerIdeas: plannerCounts?.ideas ?? 0,
+      plannerInReview: plannerCounts?.inReview ?? 0,
+      upcomingThisWeek: upcomingWeek?.n ?? 0,
       recentPosts: recentPosts.results ?? [],
     });
   });
